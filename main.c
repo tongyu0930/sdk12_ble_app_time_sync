@@ -30,9 +30,14 @@
 #include "nrf_log.h"
 #include "nrf_log_ctrl.h"
 
-#include "nrf_drv_gpiote.h"
+//#include "nrf_drv_gpiote.h"
 #include "boards.h"
 #include "app_error.h"
+
+#include "time_sync.h"
+#include "app_util_platform.h"
+#include "nrf_delay.h"
+#include "nrf_gpio.h"
 
 
 #define CENTRAL_LINK_COUNT              0                                 /**< Number of central links used by the application. When changing this number remember to adjust the RAM settings*/
@@ -46,10 +51,16 @@
 
 #define DEAD_BEEF                       0xDEADBEEF                        /**< Value used as error code on stack dump, can be used to identify stack location on stack unwind. */
 
-
+#define APP_TIMER_PRESCALER             0                                          /**< Value of the RTC1 PRESCALER register. */
+#define APP_TIMER_OP_QUEUE_SIZE         4                                          /**< Size of timer operation queues. */
+#define SYNC_BEACON_COUNT_PRINTOUT_INTERVAL APP_TIMER_TICKS(1000, APP_TIMER_PRESCALER)
 
 static ble_gap_adv_params_t m_adv_params;                                 /**< Parameters to be passed to the stack when starting advertising. */
 
+static bool                             m_advertising_running       = false;
+static bool 							m_send_sync_pkt 			= false;
+
+APP_TIMER_DEF(m_sync_count_timer_id);
 
 
 /**@brief Callback function for asserts in the SoftDevice.
@@ -66,6 +77,30 @@ static ble_gap_adv_params_t m_adv_params;                                 /**< P
 void assert_nrf_callback(uint16_t line_num, const uint8_t * p_file_name)
 {
     app_error_handler(DEAD_BEEF, line_num, p_file_name);
+}
+
+
+static void sync_beacon_count_printout_handler(void * p_context)  //这东西干什么的？
+{
+    extern volatile uint32_t m_test_count;
+    extern volatile uint32_t m_rcv_count;
+    extern volatile uint32_t m_blocked_cancelled_count;
+
+    if (m_test_count != 0)
+    {
+        NRF_LOG_INFO("TX: %d\r\n", m_test_count);
+        m_test_count = 0;
+    }
+    if (m_rcv_count != 0)
+    {
+        NRF_LOG_INFO("RX: %d\r\n", m_rcv_count);
+        m_rcv_count = 0;
+    }
+    if (m_blocked_cancelled_count != 0)
+    {
+        NRF_LOG_INFO("Blocked: %d\r\n", m_blocked_cancelled_count);
+        m_blocked_cancelled_count = 0;
+    }
 }
 
 
@@ -132,6 +167,21 @@ static void ble_evt_dispatch(ble_evt_t * p_ble_evt)
 }
 
 
+/**@brief Function for dispatching a system event to interested modules.
+ *
+ * @details This function is called from the System event interrupt handler after a system
+ *          event has been received.
+ *
+ * @param[in] sys_evt  System stack event.
+ */
+static void sys_evt_dispatch(uint32_t sys_evt)
+{
+    ts_on_sys_evt(sys_evt);  //作者添加的
+    //pstorage_sys_event_handler(sys_evt);
+    //ble_advertising_on_sys_evt(sys_evt);
+}
+
+
 /**@brief Function for initializing the BLE stack.
  *
  * @details Initializes the SoftDevice and the BLE event interrupt.
@@ -161,17 +211,21 @@ static void ble_stack_init(void)
     // Register with the SoftDevice handler module for BLE events.
     err_code = softdevice_ble_evt_handler_set(ble_evt_dispatch);
     APP_ERROR_CHECK(err_code);
+
+    // Register with the SoftDevice handler module for BLE events.
+    err_code = softdevice_sys_evt_handler_set(sys_evt_dispatch);
+    APP_ERROR_CHECK(err_code);
 }
 
-
+/*
 void in_pin_handler(nrf_drv_gpiote_pin_t pin, nrf_gpiote_polarity_t action)
 {
     //uint32_t err_code;
     //err_code = sd_ble_gap_scan_start(&m_scan_params);
     //APP_ERROR_CHECK(err_code);
-}
+}*/
 
-
+/*
 static void gpio_config()
 {
 	ret_code_t err_code;
@@ -197,7 +251,7 @@ static void gpio_config()
 
     nrf_drv_gpiote_in_event_enable(BUTTON_1, true); //Function for enabling sensing of a GPIOTE input pin.
     //true to enable the interrupt.
-}
+}*/
 
 
 /**@brief Function for doing power management.
@@ -206,6 +260,124 @@ static void power_manage(void)
 {
     uint32_t err_code = sd_app_evt_wait();
     APP_ERROR_CHECK(err_code);
+}
+
+
+void GPIOTE_IRQHandler(void) //作者添加的
+{
+    uint32_t err_code;
+
+    if (NRF_GPIOTE->EVENTS_IN[1] != 0)
+    {
+        nrf_delay_us(2000);
+
+        NRF_GPIOTE->EVENTS_IN[1] = 0;
+        if (m_send_sync_pkt)
+        {
+            m_send_sync_pkt  = false;
+            NRF_GPIO->OUTSET = LEDS_MASK;
+
+            err_code = ts_tx_stop();
+            APP_ERROR_CHECK(err_code);
+
+            NRF_LOG_INFO("Stopping sync beacon transmission!\r\n");
+        }
+        else
+        {
+            m_send_sync_pkt  = true;
+            NRF_GPIO->OUTCLR = LEDS_MASK;
+
+            err_code = ts_tx_start(100);
+            APP_ERROR_CHECK(err_code);
+
+            NRF_LOG_INFO("Starting sync beacon transmission!\r\n");
+        }
+    }
+
+    if (NRF_GPIOTE->EVENTS_IN[2] != 0)
+    {
+        NRF_GPIOTE->EVENTS_IN[2] = 0;
+
+        if (m_advertising_running)
+        {
+            NRF_LOG_INFO("Stopping advertising\r\n");
+            sd_ble_gap_adv_stop();
+            m_advertising_running = false;
+        }
+        else
+        {
+            NRF_LOG_INFO("Starting advertising\r\n");
+            advertising_start();
+            m_advertising_running = true;
+        }
+
+    }
+}
+
+
+static void sync_timer_button_init(void) //作者添加的
+{
+    uint32_t       err_code;
+    uint8_t        rf_address[5] = {0xDE, 0xAD, 0xBE, 0xEF, 0x19};
+    ts_params_t    ts_params;
+
+    NRF_GPIO->DIRSET = LEDS_MASK;
+    NRF_GPIO->OUTSET = LEDS_MASK;
+
+    NRF_GPIO->PIN_CNF[BUTTON_1] = (GPIO_PIN_CNF_DIR_Input     << GPIO_PIN_CNF_DIR_Pos)   |
+                                  (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
+                                  (GPIO_PIN_CNF_PULL_Pullup   << GPIO_PIN_CNF_PULL_Pos);
+
+    nrf_delay_us(5000);
+
+    NRF_GPIOTE->CONFIG[0] = (GPIOTE_CONFIG_MODE_Task       << GPIOTE_CONFIG_MODE_Pos)     |
+                            (GPIOTE_CONFIG_OUTINIT_Low     << GPIOTE_CONFIG_OUTINIT_Pos)  |
+                            (GPIOTE_CONFIG_POLARITY_Toggle << GPIOTE_CONFIG_POLARITY_Pos) |
+                            (24                            << GPIOTE_CONFIG_PSEL_Pos);
+
+    NRF_GPIOTE->CONFIG[1] = (GPIOTE_CONFIG_MODE_Event      << GPIOTE_CONFIG_MODE_Pos)     |
+                            (GPIOTE_CONFIG_OUTINIT_Low     << GPIOTE_CONFIG_OUTINIT_Pos)  |
+                            (GPIOTE_CONFIG_POLARITY_HiToLo << GPIOTE_CONFIG_POLARITY_Pos) |
+                            (BUTTON_1                      << GPIOTE_CONFIG_PSEL_Pos);
+
+    NRF_GPIOTE->CONFIG[2] = (GPIOTE_CONFIG_MODE_Event      << GPIOTE_CONFIG_MODE_Pos)     |
+                            (GPIOTE_CONFIG_OUTINIT_Low     << GPIOTE_CONFIG_OUTINIT_Pos)  |
+                            (GPIOTE_CONFIG_POLARITY_HiToLo << GPIOTE_CONFIG_POLARITY_Pos) |
+                            (BUTTON_2                      << GPIOTE_CONFIG_PSEL_Pos);
+
+    NRF_GPIOTE->INTENSET = GPIOTE_INTENSET_IN1_Msk | GPIOTE_INTENSET_IN2_Msk;
+
+    NVIC_ClearPendingIRQ(GPIOTE_IRQn);
+    NVIC_SetPriority(GPIOTE_IRQn, APP_IRQ_PRIORITY_LOWEST);
+    NVIC_EnableIRQ(GPIOTE_IRQn);
+
+    NRF_PPI->CH[0].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];
+    NRF_PPI->CH[0].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[0];
+    NRF_PPI->CHENSET   = PPI_CHENSET_CH0_Msk;
+
+    NRF_TIMER2->TASKS_START = 1;  //这句话是开启timer2 ？
+
+    ts_params.high_freq_timer[0] = NRF_TIMER2;
+    ts_params.high_freq_timer[1] = NRF_TIMER3;
+    ts_params.rtc             = NRF_RTC1;
+    ts_params.egu             = NRF_EGU3;
+    ts_params.egu_irq_type    = SWI3_EGU3_IRQn;
+    ts_params.ppi_chhg        = 0;
+    ts_params.ppi_chns[0]     = 1;
+    ts_params.ppi_chns[1]     = 2;
+    ts_params.ppi_chns[2]     = 3;
+    ts_params.ppi_chns[3]     = 4;
+    ts_params.rf_chn          = 125;
+    memcpy(ts_params.rf_addr, rf_address, sizeof(rf_address));
+
+    err_code = ts_init(&ts_params);
+    APP_ERROR_CHECK(err_code);
+
+    err_code = ts_enable();
+    APP_ERROR_CHECK(err_code);
+
+    NRF_LOG_INFO("Started listening for beacons.\r\n");
+    NRF_LOG_INFO("Press Button 1 to start sending sync beacons\r\n");
 }
 
 
@@ -219,13 +391,22 @@ int main(void)
     err_code = NRF_LOG_INIT(NULL);
     APP_ERROR_CHECK(err_code);
 
+    APP_TIMER_INIT(APP_TIMER_PRESCALER, APP_TIMER_OP_QUEUE_SIZE, false);
+    err_code = app_timer_create(&m_sync_count_timer_id, APP_TIMER_MODE_REPEATED, sync_beacon_count_printout_handler);
+    APP_ERROR_CHECK(err_code);
+
     ble_stack_init();
-    gpio_config();
+    //gpio_config();
     advertising_init();
 
+    err_code = app_timer_start(m_sync_count_timer_id, SYNC_BEACON_COUNT_PRINTOUT_INTERVAL, NULL);
+    APP_ERROR_CHECK(err_code);
+
     // Start execution.
-    NRF_LOG_INFO("BLE Beacon started\r\n");
-    advertising_start();
+    //NRF_LOG_INFO("BLE Beacon started\r\n");
+    //advertising_start();
+
+    sync_timer_button_init();
 
     // Enter main loop.
     for (;; )
