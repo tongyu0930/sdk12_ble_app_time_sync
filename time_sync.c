@@ -52,6 +52,9 @@ static volatile bool m_timer_update_in_progress = false;
 volatile uint32_t m_test_count = 0;
 volatile uint32_t m_rcv_count = 0;
 
+volatile uint32_t haha = 0;
+volatile bool hahaha = true;
+
 static volatile struct
 {
     int32_t timer_val;
@@ -474,10 +477,13 @@ static void sync_timer_start(void)		// 		实际是NRF_TIMER2，定义的名字�
     m_params.high_freq_timer[0]->PRESCALER   = SYNC_TIMER_PRESCALER;
     m_params.high_freq_timer[0]->BITMODE     = TIMER_BITMODE_BITMODE_16Bit << TIMER_BITMODE_BITMODE_Pos;		//16 bit timer
     m_params.high_freq_timer[0]->CC[0]       = TIMER_MAX_VAL;
-    m_params.high_freq_timer[0]->CC[3]       = TIMER_MAX_VAL / 2; // Only used for debugging purposes such as pin toggling
-    m_params.high_freq_timer[0]->SHORTS      = TIMER_SHORTS_COMPARE0_CLEAR_Msk;
+    m_params.high_freq_timer[0]->CC[3]       = TIMER_MAX_VAL; // Only used for debugging purposes such as pin toggling
+    m_params.high_freq_timer[0]->SHORTS      = TIMER_SHORTS_COMPARE0_CLEAR_Msk | TIMER_SHORTS_COMPARE3_CLEAR_Msk;
     m_params.high_freq_timer[0]->TASKS_START = 1;
     NRF_LOG_INFO("timer2 started\r\n");
+
+    //m_params.high_freq_timer[0]->SHORTS      = TIMER_SHORTS_COMPARE3_CLEAR_Msk;
+    m_params.high_freq_timer[0]->EVENTS_COMPARE[3] = 0;
 }
 
 void SWI3_EGU3_IRQHandler(void)						// I don't know what it is used for
@@ -498,8 +504,23 @@ void SWI3_EGU3_IRQHandler(void)						// I don't know what it is used for
             NRF_EGU3->EVENTS_TRIGGERED[1] = 0;
             (void) NRF_EGU3->EVENTS_TRIGGERED[1];
 
-            NRF_PPI->CHENCLR = (1 << 6) | (1 << 7)| (1 << 9);
-            NRF_LOG_INFO("679 be cleared\r\n");
+            //NRF_PPI->CHENCLR = (1 << 6) | (1 << 7)| (1 << 9);
+            if(haha==100)
+            {
+
+            	if(hahaha)
+            	{
+            		 NRF_GPIO->OUTSET = (1 << 19);
+            		hahaha = false;
+            	}else{
+            		NRF_GPIO->OUTCLR = (1 << 19);
+            	hahaha = true;
+            	}
+            	haha=0;
+            	//NRF_LOG_INFO("679 be cleared\r\n");
+            }
+            haha++;
+            //NRF_LOG_INFO("679 be cleared\r\n");
         }
 }
 
@@ -638,7 +659,7 @@ uint32_t ts_enable(void)	//A1;B1			// 这个function运行完后就待命了。
     ppi_configure();	//A3;B3
     
     NVIC_ClearPendingIRQ(m_params.egu_irq_type);
-    NVIC_SetPriority(m_params.egu_irq_type, 7);
+    NVIC_SetPriority(m_params.egu_irq_type, 2);
     NVIC_EnableIRQ(m_params.egu_irq_type);
     
     m_params.egu->INTENSET = EGU_INTENSET_TRIGGERED0_Msk; 				//Enable interrupt for TRIGGERED[0] event

@@ -374,8 +374,13 @@ static void sync_timer_button_init(void) //作者添加的
 
 //for test
 
-    //NRF_PPI->CH[0].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];  // timer2 cc[3] is for debugging
-    //NRF_PPI->CH[0].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[0];  //Action on pin is configured in CONFIG[0].POLARITY
+    NRF_PPI->CH[0].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];  // timer2 cc[3] is for debugging
+    NRF_PPI->CH[0].TEP = (uint32_t) &NRF_EGU3->TASKS_TRIGGER[1];  //Action on pin is configured in CONFIG[0].POLARITY
+    NRF_PPI->CHENSET   = (1 << 0);
+
+/*
+    //NRF_PPI->CH[0].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];
+    //NRF_PPI->CH[0].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[0];
     //NRF_PPI->CHENSET   = PPI_CHENSET_CH0_Msk;
 
     NRF_PPI->CHENCLR      = (1 << 6); // Channel enable clear 这什么意思？clear是clearregister上的bit？相当与初始化？
@@ -413,7 +418,7 @@ static void sync_timer_button_init(void) //作者添加的
     NRF_TIMER4->EVENTS_COMPARE[0] = 0; //这句话是干什么？
     NRF_TIMER4->TASKS_START = 1;
 
-//for test end
+*/ //for test end
 
     NRF_TIMER2->TASKS_START = 1;  //开启timer2
 
