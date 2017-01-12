@@ -127,7 +127,7 @@ void RADIO_IRQHandler(void)			// 这个是收到了syncpacket后的handler ？
            (NRF_RADIO->CRCSTATUS & RADIO_CRCSTATUS_CRCSTATUS_Msk) == (RADIO_CRCSTATUS_CRCSTATUS_CRCOk << RADIO_CRCSTATUS_CRCSTATUS_Pos))
         {
             sync_timer_offset_compensate();
-            ++m_rcv_count;
+            ++m_rcv_count; // means compensated 100 times?
         }
     }
 }
@@ -351,6 +351,7 @@ void timeslot_begin_handler(void)
             
             NRF_PPI->CH[ppi_chn].EEP = (uint32_t) &NRF_RADIO->EVENTS_ADDRESS;					  	// trigger: Address sent or received  //What exactly is it?
             NRF_PPI->CH[ppi_chn].TEP = (uint32_t) &m_params.high_freq_timer[0]->TASKS_CAPTURE[1]; 	// capture timer value to CC[1] register
+            																		//就是说收到广播后获取本地timer2的时间，这个时间就是compensate里的本地时间
             NRF_PPI->CHENSET         = (1 << ppi_chn);											  	//enable channel
             
             m_radio_state = RADIO_STATE_RX;				//A12   现在 m_radio_state = RADIO_STATE_RX
@@ -381,7 +382,7 @@ void timeslot_begin_handler(void)
     // Use PPI to create fixed offset between timer capture and packet transmission
 
     NRF_PPI->CH[ppi_chn].EEP = (uint32_t) &m_params.high_freq_timer[1]->EVENTS_COMPARE[0];// Compare event #0: Capture timer value for free running timer
-    NRF_PPI->CH[ppi_chn].TEP = (uint32_t) &m_params.high_freq_timer[0]->TASKS_CAPTURE[1];
+    NRF_PPI->CH[ppi_chn].TEP = (uint32_t) &m_params.high_freq_timer[0]->TASKS_CAPTURE[1]; //capture the timer value and write to cc1 register
     NRF_PPI->CHENSET         = (1 << ppi_chn);											//enable channel
     
     NRF_PPI->CH[ppi_chn2].EEP = (uint32_t) &m_params.high_freq_timer[1]->EVENTS_COMPARE[1];// Compare event #1: Trigger radio transmission
@@ -466,7 +467,7 @@ void ts_on_sys_evt(uint32_t sys_evt)
     }
 }
 
-static void sync_timer_start(void)		//A4;B4 		实际是NRF_TIMER2，定义的名字叫high_freq_timer[0]		这个就是中心坐标时间
+static void sync_timer_start(void)		// 		实际是NRF_TIMER2，定义的名字叫high_freq_timer[0]		这个就是中心坐标时间
 {
     m_params.high_freq_timer[0]->TASKS_STOP  = 1;
     m_params.high_freq_timer[0]->TASKS_CLEAR = 1;
@@ -476,6 +477,7 @@ static void sync_timer_start(void)		//A4;B4 		实际是NRF_TIMER2，定义的名
     m_params.high_freq_timer[0]->CC[3]       = TIMER_MAX_VAL / 2; // Only used for debugging purposes such as pin toggling
     m_params.high_freq_timer[0]->SHORTS      = TIMER_SHORTS_COMPARE0_CLEAR_Msk;
     m_params.high_freq_timer[0]->TASKS_START = 1;
+    NRF_LOG_INFO("timer2 started\r\n");
 }
 
 void SWI3_EGU3_IRQHandler(void)						// I don't know what it is used for
@@ -485,10 +487,20 @@ void SWI3_EGU3_IRQHandler(void)						// I don't know what it is used for
         NRF_EGU3->EVENTS_TRIGGERED[0] = 0;
         (void) NRF_EGU3->EVENTS_TRIGGERED[0];
         
-        NRF_PPI->CHENCLR = m_ppi_chen_mask;		//what does 'enable clear' means?
+        NRF_PPI->CHENCLR = m_ppi_chen_mask;		    //'enable clear' means clear
+        NRF_LOG_INFO("m_ppi_chen_mask be cleared\r\n");
         
         m_timer_update_in_progress = false;
     }
+
+    if (NRF_EGU3->EVENTS_TRIGGERED[1] != 0)
+        {
+            NRF_EGU3->EVENTS_TRIGGERED[1] = 0;
+            (void) NRF_EGU3->EVENTS_TRIGGERED[1];
+
+            NRF_PPI->CHENCLR = (1 << 6) | (1 << 7)| (1 << 9);
+            NRF_LOG_INFO("679 be cleared\r\n");
+        }
 }
 
 /*
@@ -508,7 +520,7 @@ static inline void sync_timer_offset_compensate(void)
 
     peer_timer  = m_sync_pkt.timer_val;
     peer_timer += TX_CHAIN_DELAY;									//TX_CHAIN_DELAY怎么就magical了？干什么用的？
-    local_timer = m_params.high_freq_timer[0]->CC[1];
+    local_timer = m_params.high_freq_timer[0]->CC[1];   //cc1 was captured in "timeslot begin handler"
     
     if (local_timer > peer_timer)
     {
@@ -523,7 +535,7 @@ static inline void sync_timer_offset_compensate(void)
         timer_offset == TIMER_MAX_VAL)
     {
 //        NRF_GPIO->OUT ^= (1 << 25);
-        // Already in sync
+    	NRF_LOG_INFO("already in sync\r\n");
         return;
     }
     
@@ -534,6 +546,7 @@ static inline void sync_timer_offset_compensate(void)
     
     // Enable PPI channels
     NRF_PPI->CHENSET = m_ppi_chen_mask;
+    NRF_LOG_INFO("m_ppi_chen_mask be set\r\n");
 }
 
 static void ppi_configure(void)		//A3;B3												// in this function, only configuration, not enable, CHENSET is enable
@@ -548,7 +561,7 @@ static void ppi_configure(void)		//A3;B3												// in this function, only co
     m_ppi_chen_mask = (1 << chn0) | (1 << chn1) | (1 << chn2);
     
     // so CH[chn0]=CH[1] which is channel 1, don't be confused!
-    // PPI channel 0: clear timer when offset value is reached						    // what is the 'offset value' ?
+    // PPI channel 0: clear timer when offset value is reached
     NRF_PPI->CHENCLR      = (1 << chn0); // Channel enable clear 这什么意思？clear是clearregister上的bit？相当与初始化？
     NRF_PPI->CH[chn0].EEP = (uint32_t) &m_params.high_freq_timer[0]->EVENTS_COMPARE[2]; //把channel0的eep设为timer0的compare event
     NRF_PPI->CH[chn0].TEP = (uint32_t) &m_params.high_freq_timer[0]->TASKS_CLEAR;       //tep是清零timer
@@ -566,12 +579,6 @@ static void ppi_configure(void)		//A3;B3												// in this function, only co
     //自己的comment：PPI group
     NRF_PPI->TASKS_CHG[chg].DIS = 1;													// here the group is disabled
     NRF_PPI->CHG[chg]           = (1 << chn0) | (1 << chn2);							// the ppi CHG[0] contain chn0 and chn2
-
-    //自己加的，用来trigger LED
-    //NRF_PPI->CH[6].EEP = (uint32_t) &m_params.high_freq_timer[1]->EVENTS_COMPARE[1];// Compare event #1: Trigger radio transmission
-    //NRF_PPI->CH[6].TEP = (uint32_t) &NRF_RADIO->TASKS_START;
-    //NRF_PPI->CHENSET          = (1 << 6);									    //enable channel
-
 }
 
 uint32_t ts_init(const ts_params_t * p_params)
@@ -635,6 +642,7 @@ uint32_t ts_enable(void)	//A1;B1			// 这个function运行完后就待命了。
     NVIC_EnableIRQ(m_params.egu_irq_type);
     
     m_params.egu->INTENSET = EGU_INTENSET_TRIGGERED0_Msk; 				//Enable interrupt for TRIGGERED[0] event
+    m_params.egu->INTENSET = EGU_INTENSET_TRIGGERED1_Msk;
     
     m_blocked_cancelled_count  = 0;
     m_send_sync_pkt            = false;					//A4

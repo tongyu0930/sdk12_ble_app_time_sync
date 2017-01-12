@@ -177,9 +177,7 @@ static void ble_evt_dispatch(ble_evt_t * p_ble_evt)
  */
 static void sys_evt_dispatch(uint32_t sys_evt)
 {
-    ts_on_sys_evt(sys_evt);  //作者添加的
-    //pstorage_sys_event_handler(sys_evt);
-    //ble_advertising_on_sys_evt(sys_evt);
+    ts_on_sys_evt(sys_evt);  //作者添加的;
 }
 
 
@@ -319,8 +317,8 @@ void GPIOTE_IRQHandler(void) //作者添加的
     if (NRF_GPIOTE->EVENTS_IN[3] != 0)		// for test
         {
             NRF_GPIOTE->EVENTS_IN[3] = 0;
-            NRF_LOG_INFO("Button3 is pressed\r\n");
-            NRF_PPI->CHENSET         = (1 << 6) | (1 << 7)| (1 << 8);
+            NRF_LOG_INFO("Button3 is pressed and 6789 be set\r\n");
+            NRF_PPI->CHENSET         = (1 << 6) | (1 << 7)| (1 << 8) | (1 << 9);
         }
 }
 
@@ -384,15 +382,21 @@ static void sync_timer_button_init(void) //作者添加的
     NRF_PPI->CH[6].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];
     NRF_PPI->CH[6].TEP = (uint32_t) &NRF_TIMER4->TASKS_CLEAR;       //tep是清零timer
 
-    // PPI channel 1: disable PPI channel 6 such that the timer is only reset once.
+    // PPI channel 7: disable PPI channel 6 such that the timer is only reset once.
     NRF_PPI->CHENCLR      = (1 << 7);
     NRF_PPI->CH[7].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3]; //这个是说把channel0的eep设为timer0的compare event
     NRF_PPI->CH[7].TEP = (uint32_t) &NRF_PPI->TASKS_CHG[2].DIS;  					// TEP is 'disable ppi group'
 
+    //egu
+    NRF_PPI->CHENCLR      = (1 << 9);
+    NRF_PPI->CH[9].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];
+    NRF_PPI->CH[9].TEP = (uint32_t) &NRF_EGU3->TASKS_TRIGGER[1];					// Here 'egu' appears
+
     // PPI group
     NRF_PPI->TASKS_CHG[2].DIS = 1;													// here the group is disabled
-    NRF_PPI->CHG[2]           = (1 << 6);							// the ppi CHG[0] contain chn0 and chn2
+    NRF_PPI->CHG[2]           = (1 << 6) | (1 << 9);							// the ppi CHG[0] contain chn0 and chn2
 
+    //led toggle
     NRF_PPI->CH[8].EEP = (uint32_t) &NRF_TIMER4->EVENTS_COMPARE[0];  // for led
     NRF_PPI->CH[8].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[0];  //Action on pin is configured in CONFIG[0].POLARITY
     NRF_PPI->CHENSET   = PPI_CHENSET_CH0_Msk;
@@ -403,7 +407,7 @@ static void sync_timer_button_init(void) //作者添加的
     NRF_TIMER4->PRESCALER   = 8;
     NRF_TIMER4->BITMODE     = TIMER_BITMODE_BITMODE_16Bit << TIMER_BITMODE_BITMODE_Pos;		//16 bit timer
     NRF_TIMER4->CC[0]       = 0xFFFF;
-    NRF_TIMER4->CC[1]       = 0;
+    //NRF_TIMER4->CC[1]       = 0;
     NRF_TIMER4->SHORTS      = TIMER_SHORTS_COMPARE0_CLEAR_Msk;
 
     NRF_TIMER4->EVENTS_COMPARE[0] = 0; //这句话是干什么？
