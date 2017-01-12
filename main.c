@@ -27,6 +27,7 @@
 #include "softdevice_handler.h"
 #include "bsp.h"
 #include "app_timer.h"
+#define NRF_LOG_MODULE_NAME "TIME_SYNC"
 #include "nrf_log.h"
 #include "nrf_log_ctrl.h"
 
@@ -80,7 +81,7 @@ void assert_nrf_callback(uint16_t line_num, const uint8_t * p_file_name)
 }
 
 
-static void sync_beacon_count_printout_handler(void * p_context)  //这东西干什么的？
+static void sync_beacon_count_printout_handler(void * p_context)  //这是APP TIMER's handler
 {
     extern volatile uint32_t m_test_count;
     extern volatile uint32_t m_rcv_count;
@@ -88,17 +89,17 @@ static void sync_beacon_count_printout_handler(void * p_context)  //这东西干
 
     if (m_test_count != 0)
     {
-        NRF_LOG_INFO("TX: %d\r\n", m_test_count);
+        NRF_LOG_INFO("TX(m_test_count): %d\r\n", m_test_count);
         m_test_count = 0;
     }
     if (m_rcv_count != 0)
     {
-        NRF_LOG_INFO("RX: %d\r\n", m_rcv_count);
+        NRF_LOG_INFO("RX(m_rcv_count): %d\r\n", m_rcv_count);
         m_rcv_count = 0;
     }
     if (m_blocked_cancelled_count != 0)
     {
-        NRF_LOG_INFO("Blocked: %d\r\n", m_blocked_cancelled_count);
+        NRF_LOG_INFO("Blocked(m_blocked_cancelled_count): %d\r\n", m_blocked_cancelled_count);
         m_blocked_cancelled_count = 0;
     }
 }
@@ -318,7 +319,7 @@ void GPIOTE_IRQHandler(void) //作者添加的
     if (NRF_GPIOTE->EVENTS_IN[3] != 0)		// for test
         {
             NRF_GPIOTE->EVENTS_IN[3] = 0;
-
+            NRF_LOG_INFO("Button3 is pressed\r\n");
             NRF_PPI->CHENSET         = (1 << 6) | (1 << 7)| (1 << 8);
         }
 }
@@ -337,6 +338,13 @@ static void sync_timer_button_init(void) //作者添加的
                                   (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
                                   (GPIO_PIN_CNF_PULL_Pullup   << GPIO_PIN_CNF_PULL_Pos);	// configure button1 ？
 
+    NRF_GPIO->PIN_CNF[BUTTON_2] = (GPIO_PIN_CNF_DIR_Input     << GPIO_PIN_CNF_DIR_Pos)   |
+                                      (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
+                                      (GPIO_PIN_CNF_PULL_Pullup   << GPIO_PIN_CNF_PULL_Pos);
+
+    NRF_GPIO->PIN_CNF[BUTTON_3] = (GPIO_PIN_CNF_DIR_Input     << GPIO_PIN_CNF_DIR_Pos)   |
+                                      (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
+                                      (GPIO_PIN_CNF_PULL_Pullup   << GPIO_PIN_CNF_PULL_Pos);
     nrf_delay_us(5000);
 
     NRF_GPIOTE->CONFIG[0] = (GPIOTE_CONFIG_MODE_Task       << GPIOTE_CONFIG_MODE_Pos)     |
@@ -463,7 +471,7 @@ int main(void)
     APP_ERROR_CHECK(err_code);
 
     // Start execution.
-    //NRF_LOG_INFO("BLE Beacon started\r\n");
+    NRF_LOG_INFO("BLE Beacon started\r\n");
     //advertising_start();
 
     sync_timer_button_init();
