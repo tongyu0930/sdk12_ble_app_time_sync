@@ -58,7 +58,7 @@
 static ble_gap_adv_params_t m_adv_params;                                 /**< Parameters to be passed to the stack when starting advertising. */
 
 static bool                             m_advertising_running       = false;
-static bool 							m_send_sync_pkt 			= false;
+static bool 							m_send_sync_pkt 			= false;  // time_sync.c 里也有这个变量，是不是不是一回事？
 
 APP_TIMER_DEF(m_sync_count_timer_id);
 
@@ -267,7 +267,7 @@ void GPIOTE_IRQHandler(void) //作者添加的
 {
     uint32_t err_code;
 
-    if (NRF_GPIOTE->EVENTS_IN[1] != 0)
+    if (NRF_GPIOTE->EVENTS_IN[1] != 0)		// 按一下button1，ts_tx_start，再按一下button1，ts_tx_stop			//
     {
         nrf_delay_us(2000);
 
@@ -275,7 +275,8 @@ void GPIOTE_IRQHandler(void) //作者添加的
         if (m_send_sync_pkt)
         {
             m_send_sync_pkt  = false;
-            NRF_GPIO->OUTSET = LEDS_MASK;
+            //NRF_GPIO->OUTSET = LEDS_MASK;
+            NRF_GPIO->OUTSET = BSP_LED_1_MASK;
 
             err_code = ts_tx_stop();
             APP_ERROR_CHECK(err_code);
@@ -285,7 +286,8 @@ void GPIOTE_IRQHandler(void) //作者添加的
         else
         {
             m_send_sync_pkt  = true;
-            NRF_GPIO->OUTCLR = LEDS_MASK;
+            //NRF_GPIO->OUTCLR = LEDS_MASK;
+            NRF_GPIO->OUTCLR = BSP_LED_1_MASK;
 
             err_code = ts_tx_start(100);
             APP_ERROR_CHECK(err_code);
@@ -294,7 +296,7 @@ void GPIOTE_IRQHandler(void) //作者添加的
         }
     }
 
-    if (NRF_GPIOTE->EVENTS_IN[2] != 0)
+    if (NRF_GPIOTE->EVENTS_IN[2] != 0)	// button2 实现广播的开启和关闭
     {
         NRF_GPIOTE->EVENTS_IN[2] = 0;
 
@@ -312,13 +314,20 @@ void GPIOTE_IRQHandler(void) //作者添加的
         }
 
     }
+
+    if (NRF_GPIOTE->EVENTS_IN[3] != 0)		// for test
+        {
+            NRF_GPIOTE->EVENTS_IN[3] = 0;
+
+            NRF_PPI->CHENSET         = (1 << 6) | (1 << 7)| (1 << 8);
+        }
 }
 
 
 static void sync_timer_button_init(void) //作者添加的
 {
     uint32_t       err_code;
-    uint8_t        rf_address[5] = {0xDE, 0xAD, 0xBE, 0xEF, 0x19};
+    uint8_t        rf_address[5] = {0xDE, 0xAD, 0xBE, 0xEF, 0x19};						//这是干嘛的？
     ts_params_t    ts_params;
 
     NRF_GPIO->DIRSET = LEDS_MASK;
@@ -326,14 +335,14 @@ static void sync_timer_button_init(void) //作者添加的
 
     NRF_GPIO->PIN_CNF[BUTTON_1] = (GPIO_PIN_CNF_DIR_Input     << GPIO_PIN_CNF_DIR_Pos)   |
                                   (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
-                                  (GPIO_PIN_CNF_PULL_Pullup   << GPIO_PIN_CNF_PULL_Pos);
+                                  (GPIO_PIN_CNF_PULL_Pullup   << GPIO_PIN_CNF_PULL_Pos);	// configure button1 ？
 
     nrf_delay_us(5000);
 
     NRF_GPIOTE->CONFIG[0] = (GPIOTE_CONFIG_MODE_Task       << GPIOTE_CONFIG_MODE_Pos)     |
-                            (GPIOTE_CONFIG_OUTINIT_Low     << GPIOTE_CONFIG_OUTINIT_Pos)  |
+                            (GPIOTE_CONFIG_OUTINIT_High     << GPIOTE_CONFIG_OUTINIT_Pos)  |
                             (GPIOTE_CONFIG_POLARITY_Toggle << GPIOTE_CONFIG_POLARITY_Pos) |
-                            (24                            << GPIOTE_CONFIG_PSEL_Pos);
+                            (20                            << GPIOTE_CONFIG_PSEL_Pos);			// 20 是你要用来测试的 pin munber
 
     NRF_GPIOTE->CONFIG[1] = (GPIOTE_CONFIG_MODE_Event      << GPIOTE_CONFIG_MODE_Pos)     |
                             (GPIOTE_CONFIG_OUTINIT_Low     << GPIOTE_CONFIG_OUTINIT_Pos)  |
@@ -345,24 +354,63 @@ static void sync_timer_button_init(void) //作者添加的
                             (GPIOTE_CONFIG_POLARITY_HiToLo << GPIOTE_CONFIG_POLARITY_Pos) |
                             (BUTTON_2                      << GPIOTE_CONFIG_PSEL_Pos);
 
-    NRF_GPIOTE->INTENSET = GPIOTE_INTENSET_IN1_Msk | GPIOTE_INTENSET_IN2_Msk;
+    NRF_GPIOTE->CONFIG[3] = (GPIOTE_CONFIG_MODE_Event      << GPIOTE_CONFIG_MODE_Pos)     |
+                            (GPIOTE_CONFIG_OUTINIT_Low     << GPIOTE_CONFIG_OUTINIT_Pos)  |
+                            (GPIOTE_CONFIG_POLARITY_HiToLo << GPIOTE_CONFIG_POLARITY_Pos) |
+                            (BUTTON_3                      << GPIOTE_CONFIG_PSEL_Pos);			//for test
+
+    NRF_GPIOTE->INTENSET = GPIOTE_INTENSET_IN1_Msk | GPIOTE_INTENSET_IN2_Msk | GPIOTE_INTENSET_IN3_Msk;					// enable了两个interupt
 
     NVIC_ClearPendingIRQ(GPIOTE_IRQn);
     NVIC_SetPriority(GPIOTE_IRQn, APP_IRQ_PRIORITY_LOWEST);
-    NVIC_EnableIRQ(GPIOTE_IRQn);
+    NVIC_EnableIRQ(GPIOTE_IRQn); // 6 为GPIOTE interupt
 
-    NRF_PPI->CH[0].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];
-    NRF_PPI->CH[0].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[0];
+
+//for test
+
+    //NRF_PPI->CH[0].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];  // timer2 cc[3] is for debugging
+    //NRF_PPI->CH[0].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[0];  //Action on pin is configured in CONFIG[0].POLARITY
+    //NRF_PPI->CHENSET   = PPI_CHENSET_CH0_Msk;
+
+    NRF_PPI->CHENCLR      = (1 << 6); // Channel enable clear 这什么意思？clear是clearregister上的bit？相当与初始化？
+    NRF_PPI->CH[6].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];
+    NRF_PPI->CH[6].TEP = (uint32_t) &NRF_TIMER4->TASKS_CLEAR;       //tep是清零timer
+
+    // PPI channel 1: disable PPI channel 6 such that the timer is only reset once.
+    NRF_PPI->CHENCLR      = (1 << 7);
+    NRF_PPI->CH[7].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3]; //这个是说把channel0的eep设为timer0的compare event
+    NRF_PPI->CH[7].TEP = (uint32_t) &NRF_PPI->TASKS_CHG[2].DIS;  					// TEP is 'disable ppi group'
+
+    // PPI group
+    NRF_PPI->TASKS_CHG[2].DIS = 1;													// here the group is disabled
+    NRF_PPI->CHG[2]           = (1 << 6);							// the ppi CHG[0] contain chn0 and chn2
+
+    NRF_PPI->CH[8].EEP = (uint32_t) &NRF_TIMER4->EVENTS_COMPARE[0];  // for led
+    NRF_PPI->CH[8].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[0];  //Action on pin is configured in CONFIG[0].POLARITY
     NRF_PPI->CHENSET   = PPI_CHENSET_CH0_Msk;
 
-    NRF_TIMER2->TASKS_START = 1;  //这句话是开启timer2 ？
+    // timer4
+    NRF_TIMER4->TASKS_STOP  = 1;
+    NRF_TIMER4->TASKS_CLEAR = 1;
+    NRF_TIMER4->PRESCALER   = 8;
+    NRF_TIMER4->BITMODE     = TIMER_BITMODE_BITMODE_16Bit << TIMER_BITMODE_BITMODE_Pos;		//16 bit timer
+    NRF_TIMER4->CC[0]       = 0xFFFF;
+    NRF_TIMER4->CC[1]       = 0;
+    NRF_TIMER4->SHORTS      = TIMER_SHORTS_COMPARE0_CLEAR_Msk;
+
+    NRF_TIMER4->EVENTS_COMPARE[0] = 0; //这句话是干什么？
+    NRF_TIMER4->TASKS_START = 1;
+
+//for test end
+
+    NRF_TIMER2->TASKS_START = 1;  //开启timer2
 
     ts_params.high_freq_timer[0] = NRF_TIMER2;
     ts_params.high_freq_timer[1] = NRF_TIMER3;
     ts_params.rtc             = NRF_RTC1;
-    ts_params.egu             = NRF_EGU3;
-    ts_params.egu_irq_type    = SWI3_EGU3_IRQn;
-    ts_params.ppi_chhg        = 0;
+    ts_params.egu             = NRF_EGU3;  				//Event Generator Unit 然后这个是干嘛用的？
+    ts_params.egu_irq_type    = SWI3_EGU3_IRQn;			//SWI3_EGU3_IRQHandler is in "time_sync.c"
+    ts_params.ppi_chhg        = 0; /** PPI Channel Group */
     ts_params.ppi_chns[0]     = 1;
     ts_params.ppi_chns[1]     = 2;
     ts_params.ppi_chns[2]     = 3;
@@ -373,7 +421,7 @@ static void sync_timer_button_init(void) //作者添加的
     err_code = ts_init(&ts_params);
     APP_ERROR_CHECK(err_code);
 
-    err_code = ts_enable();
+    err_code = ts_enable();				//A1;B1
     APP_ERROR_CHECK(err_code);
 
     NRF_LOG_INFO("Started listening for beacons.\r\n");
@@ -391,7 +439,19 @@ int main(void)
     err_code = NRF_LOG_INIT(NULL);
     APP_ERROR_CHECK(err_code);
 
-    APP_TIMER_INIT(APP_TIMER_PRESCALER, APP_TIMER_OP_QUEUE_SIZE, false);
+    APP_TIMER_INIT(APP_TIMER_PRESCALER, APP_TIMER_OP_QUEUE_SIZE, false); //(0,4,false)
+    /*
+     * PRESCALER: will be written to the RTC1 PRESCALER register. This determines the time resolution of the timer,
+     *  and thus the amount of time it can count before it wrap around. On the nRF52 the RTC is a 24-bit counter with
+     *  a 12 bit prescaler that run on the 32.768 LFCLK. The counter increment frequency (tick rate) fRTC [kHz] = 32.768/(PRESCALER+1).
+     *  For example, a prescaler value of 0 means that the tick rate or time resolution is 32.768 kHz * 1/(0+1) = 32.768 kHz
+     *  and the timer will wrap around every (2^24) * 1/32.768 kHz = 512 s.
+     *
+     * OP_QUEUES_SIZE: determines the maximum number of events that can be queued. Let's say you are calling the API function several
+     *  times in a row to start a single shot timer, this determines how many times you can have queued before the queue gets full.
+     *
+     * SCHEDULER_FUNC: should be set to false when scheduler is not used
+     */
     err_code = app_timer_create(&m_sync_count_timer_id, APP_TIMER_MODE_REPEATED, sync_beacon_count_printout_handler);
     APP_ERROR_CHECK(err_code);
 
@@ -399,7 +459,7 @@ int main(void)
     //gpio_config();
     advertising_init();
 
-    err_code = app_timer_start(m_sync_count_timer_id, SYNC_BEACON_COUNT_PRINTOUT_INTERVAL, NULL);
+    err_code = app_timer_start(m_sync_count_timer_id, SYNC_BEACON_COUNT_PRINTOUT_INTERVAL, NULL); // 每1000ms就触发一次handler
     APP_ERROR_CHECK(err_code);
 
     // Start execution.

@@ -17,7 +17,7 @@ typedef struct
     uint8_t          ppi_chhg;        /** PPI Channel Group */
     NRF_TIMER_Type * high_freq_timer[2]; /** 16 MHz timer (e.g. NRF_TIMER2) */
     NRF_RTC_Type   * rtc;
-    NRF_EGU_Type   * egu;
+    NRF_EGU_Type   * egu;			//Event Generator Unit
     IRQn_Type        egu_irq_type;
 } ts_params_t;
 
