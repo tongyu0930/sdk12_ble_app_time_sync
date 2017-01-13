@@ -1,3 +1,7 @@
+/**
+ * @}
+ */
+
 #include "time_sync.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -9,14 +13,7 @@
 #include "nrf_soc.h"
 #include "nrf_sdm.h"
 
-#if   defined ( __CC_ARM )
-#define TX_CHAIN_DELAY_PRESCALER_0 699
-#elif defined ( __ICCARM__ )
-#define TX_CHAIN_DELAY_PRESCALER_0 703
-#elif defined ( __GNUC__ )
-#define TX_CHAIN_DELAY_PRESCALER_0 0 //原值＝704
-#endif
-
+#define TX_CHAIN_DELAY_PRESCALER_0 0 //原值＝704		这个数值需要调试
 #define SYNC_TIMER_PRESCALER 0
 #define SYNC_RTC_PRESCALER 0
 
@@ -28,27 +25,27 @@
   
 #define TS_LEN_US                            (1000UL)
 #define TX_LEN_EXTENSION_US                  (1000UL)
-#define TS_SAFETY_MARGIN_US                  (500UL)    /**< The timeslot activity should be finished with this much to spare. */
+#define TS_SAFETY_MARGIN_US                  (500UL)   /**< The timeslot activity should be finished with this much to spare. */
 #define TS_EXTEND_MARGIN_US                  (700UL)   /**< The timeslot activity should request an extension this long before end of timeslot. */
 
 #define MAIN_DEBUG                           0x12345678UL
 
-#define TIMER_MAX_VAL (0xFFFF)
-#define RTC_MAX_VAL   (0xFFFFFF)
+#define TIMER_MAX_VAL (0xFFFF)	 //16bit
+#define RTC_MAX_VAL   (0xFFFFFF) //24bit
 
-static volatile bool m_timeslot_session_open;
-volatile uint32_t    m_blocked_cancelled_count;
-static uint32_t      m_total_timeslot_length = 0;
-static uint32_t      m_timeslot_distance = 0;
-static uint32_t      m_ppi_chen_mask = 0;
-static ts_params_t   m_params;
-static volatile bool m_send_sync_pkt = false;
-static volatile bool m_timer_update_in_progress = false;
 
-volatile uint32_t m_test_count = 0;
-volatile uint32_t m_rcv_count = 0;
+static volatile bool 	m_timeslot_session_open;
+volatile uint32_t    	m_blocked_cancelled_count;
+static uint32_t      	m_total_timeslot_length = 0;
+static uint32_t     	m_timeslot_distance = 0;
+static uint32_t     	m_ppi_chen_mask = 0;
+static ts_params_t  	m_params;
+static volatile bool 	m_send_sync_pkt = false;
+static volatile bool 	m_timer_update_in_progress = false;
 
-//volatile uint32_t haha = 0;
+volatile uint32_t 		m_test_count = 0;
+volatile uint32_t 		m_rcv_count = 0;
+
 volatile bool alreadyinsync = false;
 
 static volatile struct
@@ -64,9 +61,11 @@ static volatile enum
     RADIO_STATE_TX    /* Trying to transmit packet */
 } m_radio_state = RADIO_STATE_IDLE;
 
+
 static void sync_timer_offset_compensate(void);
 static void timeslot_begin_handler(void);
 static void timeslot_end_handler(void);
+
 
 /**< This will be used when requesting the first timeslot or any time a timeslot is blocked or cancelled. */
 static nrf_radio_request_t m_timeslot_req_earliest = {
@@ -115,18 +114,17 @@ static nrf_radio_signal_callback_return_param_t m_rsc_return_no_action = {
         };
 
 
-void RADIO_IRQHandler(void)			// 这个是收到了syncpacket后的handler ？
+void RADIO_IRQHandler(void) // 收到了sync packet后经过 radio callback，然后来到这里
 {
     if (NRF_RADIO->EVENTS_END != 0)
     {
         NRF_RADIO->EVENTS_END = 0;
         (void)NRF_RADIO->EVENTS_END;
         
-        if (m_radio_state == RADIO_STATE_RX && 
-           (NRF_RADIO->CRCSTATUS & RADIO_CRCSTATUS_CRCSTATUS_Msk) == (RADIO_CRCSTATUS_CRCSTATUS_CRCOk << RADIO_CRCSTATUS_CRCSTATUS_Pos))
+if (m_radio_state==RADIO_STATE_RX && (NRF_RADIO->CRCSTATUS & RADIO_CRCSTATUS_CRCSTATUS_Msk)==(RADIO_CRCSTATUS_CRCSTATUS_CRCOk<<RADIO_CRCSTATUS_CRCSTATUS_Pos))
         {
             sync_timer_offset_compensate();
-            ++m_rcv_count; // means compensated 100 times?
+            ++m_rcv_count;
         }
     }
 }
@@ -134,32 +132,27 @@ void RADIO_IRQHandler(void)			// 这个是收到了syncpacket后的handler ？
 
 /**@brief   Function for handling timeslot events.
  */
-static nrf_radio_signal_callback_return_param_t * radio_callback (uint8_t signal_type)
-{   
-    // NOTE: This callback runs at lower-stack priority (the highest priority possible).
+static nrf_radio_signal_callback_return_param_t * radio_callback (uint8_t signal_type) // This callback runs at lower-stack priority(the highest priority possible).
+{
     switch (signal_type) {
+
     case NRF_RADIO_CALLBACK_SIGNAL_TYPE_START:
+
         // TIMER0 is pre-configured for 1Mhz.
         NRF_TIMER0->TASKS_STOP          = 1;
         NRF_TIMER0->TASKS_CLEAR         = 1;
-        NRF_TIMER0->MODE                = (TIMER_MODE_MODE_Timer << TIMER_MODE_MODE_Pos);  // set to timer mode
-        NRF_TIMER0->EVENTS_COMPARE[0]   = 0;				// You still need to enable compare interrupt
-        NRF_TIMER0->EVENTS_COMPARE[1]   = 0;  				// what dose "=0" mean?
-        /*
-         * 自己的理解：
-         * enable EVENTS_COMPARE[x] channel，然后在对应的CC[x] register 上设置数值，一旦达到这个数值就触发event。
-         * 或者enable TASKS_CAPTURE channel，当capture到task时，对应的CC[x] register 上就会被写入timer的数值
-         */
+        NRF_TIMER0->MODE                = (TIMER_MODE_MODE_Timer << TIMER_MODE_MODE_Pos);
+        NRF_TIMER0->EVENTS_COMPARE[0]   = 0;													// You still need to enable compare interrupt
+        NRF_TIMER0->EVENTS_COMPARE[1]   = 0;  													// what dose "=0" mean?
     
-        	if (m_send_sync_pkt) // 第一次按下button1后，括号里就为true了
-        	{
-        		NRF_TIMER0->INTENSET  = (TIMER_INTENSET_COMPARE0_Set << TIMER_INTENSET_COMPARE0_Pos); // Enable timer0 compare0 interrupt
-        	}
-        	else
-        	{
-        		NRF_TIMER0->INTENSET = (TIMER_INTENSET_COMPARE0_Set << TIMER_INTENSET_COMPARE0_Pos) |
-        							   (TIMER_INTENSET_COMPARE1_Set << TIMER_INTENSET_COMPARE1_Pos); // Enable timer0 compare0 and compare1 interrupt
-        	}
+        if (m_send_sync_pkt) // true or false is only controlled by button1
+        {
+        	NRF_TIMER0->INTENSET  = (TIMER_INTENSET_COMPARE0_Set << TIMER_INTENSET_COMPARE0_Pos); // Enable timer0 compare0 interrupt
+        }
+        else{
+        	NRF_TIMER0->INTENSET = (TIMER_INTENSET_COMPARE0_Set << TIMER_INTENSET_COMPARE0_Pos) |
+        						   (TIMER_INTENSET_COMPARE1_Set << TIMER_INTENSET_COMPARE1_Pos); // Enable timer0 compare0 and compare1 interrupt
+        }
 
         NRF_TIMER0->CC[0]               = (TS_LEN_US - TS_SAFETY_MARGIN_US);					// capture/compare 0 是 timeslot lenght - safety margin
         NRF_TIMER0->CC[1]               = (TS_LEN_US - TS_EXTEND_MARGIN_US);					// timeslot tutorial 里也有这一句
@@ -169,20 +162,20 @@ static nrf_radio_signal_callback_return_param_t * radio_callback (uint8_t signal
 
         NRF_RADIO->POWER                = (RADIO_POWER_POWER_Enabled << RADIO_POWER_POWER_Pos);		// turn on radio
 
-        NVIC_EnableIRQ(TIMER0_IRQn); // turn on NRF_TIMER0 interrupt			// 这样NRF_RADIO_CALLBACK_SIGNAL_TYPE_TIMER0 就可以发生了。
+        NVIC_EnableIRQ(TIMER0_IRQn); // turn on NRF_TIMER0 interrupt   // 这样NRF_RADIO_CALLBACK_SIGNAL_TYPE_TIMER0 就可以发生了。
         
         m_total_timeslot_length = 0;
         
-        timeslot_begin_handler();			// A7
+        timeslot_begin_handler();
         
         break;
     
     case NRF_RADIO_CALLBACK_SIGNAL_TYPE_TIMER0:
-        if (NRF_TIMER0->EVENTS_COMPARE[0] &&
-           (NRF_TIMER0->INTENSET & (TIMER_INTENSET_COMPARE0_Enabled << TIMER_INTENCLR_COMPARE0_Pos))) // NRF_TIMER0->EVENTS_COMPARE[0]要不为零
+
+        if (NRF_TIMER0->EVENTS_COMPARE[0] && (NRF_TIMER0->INTENSET & (TIMER_INTENSET_COMPARE0_Enabled << TIMER_INTENCLR_COMPARE0_Pos)))
         {
             NRF_TIMER0->TASKS_STOP  = 1;
-            NRF_TIMER0->EVENTS_COMPARE[0] = 0;
+            NRF_TIMER0->EVENTS_COMPARE[0] = 0;	// 这是说停止timer0后在清零compare？
             (void)NRF_TIMER0->EVENTS_COMPARE[0];
             
             // This is the "timeslot is about to end" timeout
@@ -190,7 +183,7 @@ static nrf_radio_signal_callback_return_param_t * radio_callback (uint8_t signal
             timeslot_end_handler();
             
             // Schedule next timeslot
-            if (m_send_sync_pkt) 									// 按下 button 后就为 true 了。
+            if (m_send_sync_pkt) // true or false is only controlled by button1
             {
                 m_timeslot_req_normal.params.normal.distance_us = m_total_timeslot_length + m_timeslot_distance;
                 return (nrf_radio_signal_callback_return_param_t*) &m_rsc_return_sched_next_normal;
@@ -203,8 +196,7 @@ static nrf_radio_signal_callback_return_param_t * radio_callback (uint8_t signal
 
 
         //NRF_TIMER0->EVENTS_COMPARE[1] 不能为零
-        if (NRF_TIMER0->EVENTS_COMPARE[1] &&
-           (NRF_TIMER0->INTENSET & (TIMER_INTENSET_COMPARE1_Enabled << TIMER_INTENCLR_COMPARE1_Pos))) //不按button1才开启timer0 compare1
+        if (NRF_TIMER0->EVENTS_COMPARE[1] && (NRF_TIMER0->INTENSET & (TIMER_INTENSET_COMPARE1_Enabled << TIMER_INTENCLR_COMPARE1_Pos)))
         {
             NRF_TIMER0->EVENTS_COMPARE[1] = 0;
             (void)NRF_TIMER0->EVENTS_COMPARE[1];
@@ -216,13 +208,13 @@ static nrf_radio_signal_callback_return_param_t * radio_callback (uint8_t signal
                 // Request timeslot extension if total length does not exceed 128 seconds
                 return (nrf_radio_signal_callback_return_param_t*) &m_rsc_extend;
             }
-            else if (!m_send_sync_pkt)
+            else if (!m_send_sync_pkt) // true or false is only controlled by button1
             {
                 // Don't do anything. Timeslot will end and new one requested upon the next timer0 compare. 
                 
-//                // Return with normal action request
-//                m_timeslot_req_normal.params.normal.distance_us = m_total_timeslot_length + m_timeslot_distance;
-//                return (nrf_radio_signal_callback_return_param_t*) &m_rsc_return_sched_next_normal;
+                // Return with normal action request
+                //m_timeslot_req_normal.params.normal.distance_us = m_total_timeslot_length + m_timeslot_distance;
+                //return (nrf_radio_signal_callback_return_param_t*) &m_rsc_return_sched_next_normal;
             }
         }
         
@@ -231,14 +223,18 @@ static nrf_radio_signal_callback_return_param_t * radio_callback (uint8_t signal
         
         
     case NRF_RADIO_CALLBACK_SIGNAL_TYPE_RADIO:
+
         RADIO_IRQHandler();
+
         break;
     
     case NRF_RADIO_CALLBACK_SIGNAL_TYPE_EXTEND_FAILED:
+
         // Don't do anything. Our timer will expire before timeslot ends
         return (nrf_radio_signal_callback_return_param_t*) &m_rsc_return_no_action;
     
     case NRF_RADIO_CALLBACK_SIGNAL_TYPE_EXTEND_SUCCEEDED:
+
         // Extension succeeded: update timer
         NRF_TIMER0->TASKS_STOP          = 1;
         NRF_TIMER0->EVENTS_COMPARE[0]   = 0;
@@ -249,10 +245,13 @@ static nrf_radio_signal_callback_return_param_t * radio_callback (uint8_t signal
     
         // Keep track of total length
         m_total_timeslot_length += TX_LEN_EXTENSION_US;
+
         break;
     
     default:
+
         app_error_handler(MAIN_DEBUG, __LINE__, (const uint8_t*)__FILE__);
+
         break;
     };
 
@@ -267,15 +266,15 @@ static void update_radio_parameters()
     NRF_RADIO->TXPOWER   = RADIO_TXPOWER_TXPOWER_0dBm   << RADIO_TXPOWER_TXPOWER_Pos;
     
     // RF bitrate
-    NRF_RADIO->MODE      = RADIO_MODE_MODE_Nrf_2Mbit       << RADIO_MODE_MODE_Pos;
+    NRF_RADIO->MODE      = RADIO_MODE_MODE_Nrf_2Mbit    << RADIO_MODE_MODE_Pos;
     
     // Fast startup mode
-    NRF_RADIO->MODECNF0 = RADIO_MODECNF0_RU_Fast << RADIO_MODECNF0_RU_Pos;
+    NRF_RADIO->MODECNF0  = RADIO_MODECNF0_RU_Fast 		<< RADIO_MODECNF0_RU_Pos;
     
     // CRC configuration
     NRF_RADIO->CRCCNF    = RADIO_CRCCNF_LEN_Three << RADIO_CRCCNF_LEN_Pos; 
-    NRF_RADIO->CRCINIT = 0xFFFFFFUL;      // Initial value      
-    NRF_RADIO->CRCPOLY = 0x11021UL;     // CRC poly: x^16+x^12^x^5+1
+    NRF_RADIO->CRCINIT   = 0xFFFFFFUL;    // Initial value
+    NRF_RADIO->CRCPOLY   = 0x11021UL;     // CRC poly: x^16+x^12^x^5+1
     
     // Packet format 
     NRF_RADIO->PCNF0 = (0 << RADIO_PCNF0_S0LEN_Pos) | (0 << RADIO_PCNF0_LFLEN_Pos) | (0 << RADIO_PCNF0_S1LEN_Pos);
@@ -287,21 +286,21 @@ static void update_radio_parameters()
     NRF_RADIO->PACKETPTR = (uint32_t)&m_sync_pkt;
     
     // Radio address config
-    NRF_RADIO->PREFIX0 = m_params.rf_addr[0];
-    NRF_RADIO->BASE0   = (m_params.rf_addr[1] << 24 | m_params.rf_addr[2] << 16 | m_params.rf_addr[3] << 8 | m_params.rf_addr[4]);
+    NRF_RADIO->PREFIX0 		= m_params.rf_addr[0];
+    NRF_RADIO->BASE0  		= (m_params.rf_addr[1] << 24 | m_params.rf_addr[2] << 16 | m_params.rf_addr[3] << 8 | m_params.rf_addr[4]);
     
-    NRF_RADIO->TXADDRESS   = 0;
-    NRF_RADIO->RXADDRESSES = (1 << 0);
+    NRF_RADIO->TXADDRESS    = 0;
+    NRF_RADIO->RXADDRESSES  = (1 << 0);
     
-    NRF_RADIO->FREQUENCY = m_params.rf_chn;
-    NRF_RADIO->TXPOWER   = RADIO_TXPOWER_TXPOWER_Pos4dBm << RADIO_TXPOWER_TXPOWER_Pos;
+    NRF_RADIO->FREQUENCY 	= m_params.rf_chn;
+    NRF_RADIO->TXPOWER   	= RADIO_TXPOWER_TXPOWER_Pos4dBm << RADIO_TXPOWER_TXPOWER_Pos;
     
-    NRF_RADIO->EVENTS_END = 0;
+    NRF_RADIO->EVENTS_END 	= 0;
     
-    NRF_RADIO->INTENCLR = 0xFFFFFFFF;
-    NRF_RADIO->INTENSET = RADIO_INTENSET_END_Msk;
+    NRF_RADIO->INTENCLR 	= 0xFFFFFFFF;
+    NRF_RADIO->INTENSET 	= RADIO_INTENSET_END_Msk;
     
-    NVIC_EnableIRQ(RADIO_IRQn);			//A11
+    NVIC_EnableIRQ(RADIO_IRQn);
 }
 
 /**@brief IRQHandler used for execution context management. 
@@ -312,15 +311,15 @@ void timeslot_end_handler(void)
 {   
     uint32_t ppi_chn;
     
-    ppi_chn = m_params.ppi_chns[2];			// eep 和tep 在  begin handler 里设置了。
+    ppi_chn = m_params.ppi_chns[2];	// eep 和tep 在 begin handler 里设置了。
     
     NRF_RADIO->TASKS_DISABLE = 1;
     NRF_RADIO->INTENCLR      = 0xFFFFFFFF;
     
-    NRF_PPI->CHENCLR = (1 << ppi_chn);
+    NRF_PPI->CHENCLR = (1 << ppi_chn); // disable this CH
     
-    m_total_timeslot_length = 0;
-    m_radio_state           = RADIO_STATE_IDLE;
+    m_total_timeslot_length  = 0;
+    m_radio_state            = RADIO_STATE_IDLE;
 }
 
 /**@brief IRQHandler used for execution context management. 
@@ -336,24 +335,24 @@ void timeslot_begin_handler(void)
     uint32_t ppi_chn;
     uint32_t ppi_chn2;
     
-    if (!m_send_sync_pkt) //此时m_send_sync_pkt为false，当按了button后就是true，所以state为TX时也进不了这个if，只有idle时才行。那这个if有何意义？
+    if (!m_send_sync_pkt) // true or false is only controlled by button1
     {
-        if (m_radio_state    != RADIO_STATE_RX ||
-            NRF_RADIO->STATE != (RADIO_STATE_STATE_Rx << RADIO_STATE_STATE_Pos))			//A9	此时m_radio_state = RADIO_STATE_IDLE
+    	// 没有在发送packet 并且也不是在RX状态－－－也就是最初刚停止TX时才可进入下面的IF
+        if (m_radio_state != RADIO_STATE_RX || NRF_RADIO->STATE != (RADIO_STATE_STATE_Rx << RADIO_STATE_STATE_Pos)) //m_radio_state = RADIO_STATE_IDLE 才可进入
         {
-            ppi_chn = m_params.ppi_chns[2];    									//名字是ppi_chns[2]，但其实是3
+            ppi_chn = m_params.ppi_chns[2]; //名字是ppi_chns[2]，但其实是CH3
             
-            update_radio_parameters();					//A10
+            update_radio_parameters();
             
-            NRF_RADIO->SHORTS     = RADIO_SHORTS_READY_START_Msk | RADIO_SHORTS_END_START_Msk;
-            NRF_RADIO->TASKS_RXEN = 1;
+            NRF_RADIO->SHORTS     	 = RADIO_SHORTS_READY_START_Msk | RADIO_SHORTS_END_START_Msk;
+            NRF_RADIO->TASKS_RXEN    = 1;
             
             NRF_PPI->CH[ppi_chn].EEP = (uint32_t) &NRF_RADIO->EVENTS_ADDRESS;					  	// trigger: Address sent or received  //What exactly is it?
             NRF_PPI->CH[ppi_chn].TEP = (uint32_t) &m_params.high_freq_timer[0]->TASKS_CAPTURE[1]; 	// capture timer value to CC[1] register
             																		//就是说收到广播后获取本地timer2的时间，这个时间就是compensate里的本地时间
-            NRF_PPI->CHENSET         = (1 << ppi_chn);											  	//enable channel
+            NRF_PPI->CHENSET         = (1 << ppi_chn);
             
-            m_radio_state = RADIO_STATE_RX;				//A12   现在 m_radio_state = RADIO_STATE_RX
+            m_radio_state = RADIO_STATE_RX;
         }
         
         return;
@@ -369,24 +368,22 @@ void timeslot_begin_handler(void)
         }
     }
 
-    
-// 那也就是说只有当 m_radio_state == RADIO_STATE_TX  时才会执行下面的语句？yes!
+    // 那也就是说只有当 m_radio_state != RX || IDLE  时才会执行下面的语句
     update_radio_parameters();
     
     //here to re-configure ppi for TX mode, "ppi_configure" is configured for RX mode.
     //NRF_TIMER3 is used to trigger "get nrf_timer0 value" and "radio transmission"
-
+    // Use PPI to create fixed offset between timer capture and packet transmission
     ppi_chn  = m_params.ppi_chns[0];	//ppi_chn=1
     ppi_chn2 = m_params.ppi_chns[1];	//ppi_chn2=2
-    // Use PPI to create fixed offset between timer capture and packet transmission
-
-    NRF_PPI->CH[ppi_chn].EEP = (uint32_t) &m_params.high_freq_timer[1]->EVENTS_COMPARE[0];// Compare event #0: Capture timer value for free running timer
-    NRF_PPI->CH[ppi_chn].TEP = (uint32_t) &m_params.high_freq_timer[0]->TASKS_CAPTURE[1]; //capture the timer value and write to cc1 register
-    NRF_PPI->CHENSET         = (1 << ppi_chn);											//enable channel
     
-    NRF_PPI->CH[ppi_chn2].EEP = (uint32_t) &m_params.high_freq_timer[1]->EVENTS_COMPARE[1];// Compare event #1: Trigger radio transmission
+    NRF_PPI->CH[ppi_chn].EEP = (uint32_t) &m_params.high_freq_timer[1]->EVENTS_COMPARE[0];	// Compare event #0: Capture timer value for free running timer
+    NRF_PPI->CH[ppi_chn].TEP = (uint32_t) &m_params.high_freq_timer[0]->TASKS_CAPTURE[1]; 	// capture the timer value and write to cc1 register
+    NRF_PPI->CHENSET         = (1 << ppi_chn);											  	// enable channel
+
+    NRF_PPI->CH[ppi_chn2].EEP = (uint32_t) &m_params.high_freq_timer[1]->EVENTS_COMPARE[1]; // Compare event #1: Trigger radio transmission
     NRF_PPI->CH[ppi_chn2].TEP = (uint32_t) &NRF_RADIO->TASKS_START;
-    NRF_PPI->CHENSET          = (1 << ppi_chn2);									    //enable channel
+    NRF_PPI->CHENSET          = (1 << ppi_chn2);									        //enable channel
     
     m_params.high_freq_timer[1]->PRESCALER   = 4; // 1 us resolution
     m_params.high_freq_timer[1]->MODE        = TIMER_MODE_MODE_Timer << TIMER_MODE_MODE_Pos;
@@ -409,16 +406,16 @@ void timeslot_begin_handler(void)
         __NOP();
     }
     
-    m_radio_state                                 = RADIO_STATE_TX;
-    m_sync_pkt.timer_val                          = m_params.high_freq_timer[0]->CC[1];
-    m_sync_pkt.rtc_val                            = m_params.rtc->COUNTER;
+    m_radio_state                = RADIO_STATE_TX;
+    m_sync_pkt.timer_val         = m_params.high_freq_timer[0]->CC[1];
+    m_sync_pkt.rtc_val           = m_params.rtc->COUNTER;
     
     ++m_test_count;
 }
 
 /**@brief Function for handling the Application's system events.
  *
- * @param[in]   sys_evt   system event.  在main.c里
+ * @param[in]   sys_evt   system event.  在main.c里call的
  */
 void ts_on_sys_evt(uint32_t sys_evt)
 {
@@ -466,11 +463,11 @@ void ts_on_sys_evt(uint32_t sys_evt)
     }
 }
 
-static void sync_timer_start(void)		// 		实际是NRF_TIMER2，定义的名字叫high_freq_timer[0]		这个就是中心坐标时间
+static void sync_timer_start(void)		     //实际是NRF_TIMER2，定义的名字叫high_freq_timer[0]，这个就是被同步的timer
 {
     m_params.high_freq_timer[0]->TASKS_STOP  = 1;
     m_params.high_freq_timer[0]->TASKS_CLEAR = 1;
-    m_params.high_freq_timer[0]->PRESCALER   = 8;
+    m_params.high_freq_timer[0]->PRESCALER   = 8; // 原值为：SYNC_TIMER_PRESCALER
     m_params.high_freq_timer[0]->BITMODE     = TIMER_BITMODE_BITMODE_16Bit << TIMER_BITMODE_BITMODE_Pos;		//16 bit timer
     m_params.high_freq_timer[0]->CC[0]       = TIMER_MAX_VAL;
     m_params.high_freq_timer[0]->CC[3]       = TIMER_MAX_VAL; // Only used for debugging purposes such as pin toggling
@@ -478,18 +475,17 @@ static void sync_timer_start(void)		// 		实际是NRF_TIMER2，定义的名字�
     m_params.high_freq_timer[0]->TASKS_START = 1;
     NRF_LOG_INFO("timer2 started\r\n");
 
-    //m_params.high_freq_timer[0]->SHORTS      = TIMER_SHORTS_COMPARE3_CLEAR_Msk;
     m_params.high_freq_timer[0]->EVENTS_COMPARE[3] = 0;
 }
 
-void SWI3_EGU3_IRQHandler(void)						// I don't know what it is used for
+void SWI3_EGU3_IRQHandler(void)				// it is used to shut down thoses PPIs that is used for clear timer2's offset
 {
     if (NRF_EGU3->EVENTS_TRIGGERED[0] != 0)
     {
         NRF_EGU3->EVENTS_TRIGGERED[0] = 0;
         (void) NRF_EGU3->EVENTS_TRIGGERED[0];
         
-        NRF_PPI->CHENCLR = m_ppi_chen_mask;		    //'enable clear' means clear
+        NRF_PPI->CHENCLR = m_ppi_chen_mask;
         NRF_LOG_INFO("m_ppi_chen_mask be cleared\r\n");
         
         m_timer_update_in_progress = false;
@@ -501,24 +497,9 @@ void SWI3_EGU3_IRQHandler(void)						// I don't know what it is used for
             NRF_EGU3->EVENTS_TRIGGERED[1] = 0;
             (void) NRF_EGU3->EVENTS_TRIGGERED[1];
 
-            //NRF_PPI->CHENCLR = (1 << 6) | (1 << 7)| (1 << 9);
-            if(haha==100)
-            {
-
-            	if(hahaha)
-            	{
-            		 NRF_GPIO->OUTSET = (1 << 19);
-            		hahaha = false;
-            	}else{
-            		NRF_GPIO->OUTCLR = (1 << 19);
-            	hahaha = true;
-            	}
-            	haha=0;
-            	//NRF_LOG_INFO("679 be cleared\r\n");
-            }
-            haha++;
-            //NRF_LOG_INFO("679 be cleared\r\n");
-        }*/
+            // TODO
+        }
+     */
 }
 
 /*
@@ -552,7 +533,7 @@ static inline void sync_timer_offset_compensate(void)
     //if (timer_offset == 0 ||timer_offset == TIMER_MAX_VAL) // this one is original
     if (timer_offset < 10 || timer_offset > (TIMER_MAX_VAL-10))
     {
-//        NRF_GPIO->OUT ^= (1 << 25);
+        //NRF_GPIO->OUT ^= (1 << 25); // 这话是作者留下的，什么意思？
     	alreadyinsync = true;
     	NRF_LOG_INFO("already in sync\r\n");
         //return;
@@ -573,7 +554,7 @@ static inline void sync_timer_offset_compensate(void)
 	}
 }
 
-static void ppi_configure(void)		//A3;B3												// in this function, only configuration, not enable, CHENSET is enable
+static void ppi_configure(void)	// in this function, only configuration, not enable, CHENSET is enable
 {
     uint32_t chn0, chn1, chn2, chg;
     
@@ -586,7 +567,7 @@ static void ppi_configure(void)		//A3;B3												// in this function, only co
     
     // so CH[chn0]=CH[1] which is channel 1, don't be confused!
     // PPI channel 0: clear timer when offset value is reached
-    NRF_PPI->CHENCLR      = (1 << chn0); // Channel enable clear 这什么意思？clear是clearregister上的bit？相当与初始化？
+    NRF_PPI->CHENCLR      = (1 << chn0);
     NRF_PPI->CH[chn0].EEP = (uint32_t) &m_params.high_freq_timer[0]->EVENTS_COMPARE[2]; //把channel0的eep设为timer0的compare event
     NRF_PPI->CH[chn0].TEP = (uint32_t) &m_params.high_freq_timer[0]->TASKS_CLEAR;       //tep是清零timer
     
@@ -595,7 +576,6 @@ static void ppi_configure(void)		//A3;B3												// in this function, only co
     NRF_PPI->CH[chn1].EEP = (uint32_t) &m_params.high_freq_timer[0]->EVENTS_COMPARE[2]; //这个是说把channel0的eep设为timer0的compare event
     NRF_PPI->CH[chn1].TEP = (uint32_t) &NRF_PPI->TASKS_CHG[chg].DIS;  					// TEP is 'disable ppi group'
     
-    //
     NRF_PPI->CHENCLR      = (1 << chn2);
     NRF_PPI->CH[chn2].EEP = (uint32_t) &m_params.high_freq_timer[0]->EVENTS_COMPARE[2];
     NRF_PPI->CH[chn2].TEP = (uint32_t) &m_params.egu->TASKS_TRIGGER[0];					// Here 'egu' appears
@@ -626,7 +606,7 @@ uint32_t ts_init(const ts_params_t * p_params)
     return NRF_SUCCESS;
 }
 
-uint32_t ts_enable(void)	//A1;B1			// 这个function运行完后就待命了。
+uint32_t ts_enable(void)
 {
     uint32_t err_code;
     
@@ -647,7 +627,7 @@ uint32_t ts_enable(void)	//A1;B1			// 这个function运行完后就待命了。
         return err_code;
     }
 
-    err_code = sd_radio_session_open(radio_callback); //Opens a session for radio timeslot requests			//A2;B2
+    err_code = sd_radio_session_open(radio_callback); //Opens a session for radio timeslot requests
     if (err_code != NRF_SUCCESS)
     {
         return err_code;
@@ -659,7 +639,7 @@ uint32_t ts_enable(void)	//A1;B1			// 这个function运行完后就待命了。
         return err_code;
     }
     
-    ppi_configure();	//A3;B3
+    ppi_configure();
     
     NVIC_ClearPendingIRQ(m_params.egu_irq_type);
     NVIC_SetPriority(m_params.egu_irq_type, 7);
@@ -669,11 +649,10 @@ uint32_t ts_enable(void)	//A1;B1			// 这个function运行完后就待命了。
     m_params.egu->INTENSET = EGU_INTENSET_TRIGGERED1_Msk;
     
     m_blocked_cancelled_count  = 0;
-    m_send_sync_pkt            = false;					//A4
-    m_radio_state              = RADIO_STATE_IDLE;		//A5
+    m_send_sync_pkt            = false;
+    m_radio_state              = RADIO_STATE_IDLE;
     
-    sync_timer_start();			//A6;B4      //是NRF_TIMER2，定义的名字叫high_freq_timer[0]
-    // since three ppi channels about NRF_TIMER2 already been configured, now the NRF_TIMER2 is running. the last thing is enable ppi channels.
+    sync_timer_start();
     
     m_timeslot_session_open    = true;
     
@@ -688,7 +667,7 @@ uint32_t ts_disable(void)
     return NRF_ERROR_NOT_SUPPORTED;
 }
 
-uint32_t ts_tx_start(uint32_t sync_freq_hz)			// controlled by button
+uint32_t ts_tx_start(uint32_t sync_freq_hz)	// controlled by button
 {
     uint32_t distance;
     
@@ -705,7 +684,7 @@ uint32_t ts_tx_start(uint32_t sync_freq_hz)			// controlled by button
     return NRF_SUCCESS;
 }
     
-uint32_t ts_tx_stop()								// controlled by button
+uint32_t ts_tx_stop()					   // controlled by button
 {
     m_send_sync_pkt = false;
     
