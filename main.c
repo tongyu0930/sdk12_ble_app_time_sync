@@ -265,6 +265,7 @@ static void power_manage(void)
 void GPIOTE_IRQHandler(void) //作者添加的
 {
     uint32_t err_code;
+    bool buttonthreealready = false;
 
     if (NRF_GPIOTE->EVENTS_IN[1] != 0)		// 按一下button1，ts_tx_start，再按一下button1，ts_tx_stop			//
     {
@@ -317,8 +318,27 @@ void GPIOTE_IRQHandler(void) //作者添加的
     if (NRF_GPIOTE->EVENTS_IN[3] != 0)		// for test
         {
             NRF_GPIOTE->EVENTS_IN[3] = 0;
-            NRF_LOG_INFO("Button3 is pressed and 6789 be set\r\n");
-            NRF_PPI->CHENSET         = (1 << 6) | (1 << 7)| (1 << 8) | (1 << 9);
+            NRF_LOG_INFO("Button3 is pressed\r\n");
+            if(!buttonthreealready)
+            {
+            		NRF_PPI->CHENCLR      = (1 << 6);
+                    NRF_PPI->CH[6].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];
+                    NRF_PPI->CH[6].TEP = (uint32_t) &NRF_TIMER4->TASKS_COUNT;
+                    NRF_PPI->CHENSET   = PPI_CHENSET_CH6_Msk;
+
+                    NRF_PPI->CHENCLR      = (1 << 7);
+                    NRF_PPI->CH[7].EEP = (uint32_t) &NRF_TIMER4->EVENTS_COMPARE[0];
+                    NRF_PPI->CH[7].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[0];
+                    NRF_PPI->CHENSET      = (1 << 7);
+
+                    NRF_PPI->CHENCLR      = (1 << 8);
+                    NRF_PPI->CH[8].EEP = (uint32_t) &NRF_TIMER4->EVENTS_COMPARE[0];
+                    NRF_PPI->CH[8].TEP = (uint32_t) &NRF_TIMER4->TASKS_CLEAR;
+                    NRF_PPI->CHENSET      = (1 << 8);
+
+                    buttonthreealready = true;
+            }
+
         }
 }
 
@@ -348,7 +368,7 @@ static void sync_timer_button_init(void) //作者添加的
     NRF_GPIOTE->CONFIG[0] = (GPIOTE_CONFIG_MODE_Task       << GPIOTE_CONFIG_MODE_Pos)     |
                             (GPIOTE_CONFIG_OUTINIT_High     << GPIOTE_CONFIG_OUTINIT_Pos)  |
                             (GPIOTE_CONFIG_POLARITY_Toggle << GPIOTE_CONFIG_POLARITY_Pos) |
-                            (20                            << GPIOTE_CONFIG_PSEL_Pos);			// 20 是你要用来测试的 pin munber
+                            (19                            << GPIOTE_CONFIG_PSEL_Pos);			// 20 是你要用来测试的 pin munber
 
     NRF_GPIOTE->CONFIG[1] = (GPIOTE_CONFIG_MODE_Event      << GPIOTE_CONFIG_MODE_Pos)     |
                             (GPIOTE_CONFIG_OUTINIT_Low     << GPIOTE_CONFIG_OUTINIT_Pos)  |
@@ -372,53 +392,54 @@ static void sync_timer_button_init(void) //作者添加的
     NVIC_EnableIRQ(GPIOTE_IRQn); // 6 为GPIOTE interupt
 
 
-//for test
+/*for test
 
-    NRF_PPI->CH[0].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];  // timer2 cc[3] is for debugging
-    NRF_PPI->CH[0].TEP = (uint32_t) &NRF_EGU3->TASKS_TRIGGER[1];  //Action on pin is configured in CONFIG[0].POLARITY
-    NRF_PPI->CHENSET   = (1 << 0);
+    //NRF_PPI->CH[0].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];  // timer2 cc[3] is for debugging
+    //NRF_PPI->CH[0].TEP = (uint32_t) &NRF_EGU3->TASKS_TRIGGER[1];  //Action on pin is configured in CONFIG[0].POLARITY
+    //NRF_PPI->CHENSET   = (1 << 0);
 
-/*
+
     //NRF_PPI->CH[0].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];
     //NRF_PPI->CH[0].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[0];
     //NRF_PPI->CHENSET   = PPI_CHENSET_CH0_Msk;
 
-    NRF_PPI->CHENCLR      = (1 << 6); // Channel enable clear 这什么意思？clear是clearregister上的bit？相当与初始化？
-    NRF_PPI->CH[6].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];
-    NRF_PPI->CH[6].TEP = (uint32_t) &NRF_TIMER4->TASKS_CLEAR;       //tep是清零timer
+    //NRF_PPI->CHENCLR      = (1 << 6);
+    //NRF_PPI->CH[6].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];
+    //NRF_PPI->CH[6].TEP = (uint32_t) &NRF_TIMER4->TASKS_CLEAR;//清零timer
 
     // PPI channel 7: disable PPI channel 6 such that the timer is only reset once.
-    NRF_PPI->CHENCLR      = (1 << 7);
-    NRF_PPI->CH[7].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3]; //这个是说把channel0的eep设为timer0的compare event
-    NRF_PPI->CH[7].TEP = (uint32_t) &NRF_PPI->TASKS_CHG[2].DIS;  					// TEP is 'disable ppi group'
+    //NRF_PPI->CHENCLR      = (1 << 7);
+    //NRF_PPI->CH[7].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3]; //这个是说把channel0的eep设为timer0的compare event
+    //NRF_PPI->CH[7].TEP = (uint32_t) &NRF_PPI->TASKS_CHG[2].DIS;  					// TEP is 'disable ppi group'
 
     //egu
-    NRF_PPI->CHENCLR      = (1 << 9);
-    NRF_PPI->CH[9].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];
-    NRF_PPI->CH[9].TEP = (uint32_t) &NRF_EGU3->TASKS_TRIGGER[1];					// Here 'egu' appears
+    //NRF_PPI->CHENCLR      = (1 << 9);
+    //NRF_PPI->CH[9].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];
+    //NRF_PPI->CH[9].TEP = (uint32_t) &NRF_EGU3->TASKS_TRIGGER[1];					// Here 'egu' appears
 
     // PPI group
-    NRF_PPI->TASKS_CHG[2].DIS = 1;													// here the group is disabled
-    NRF_PPI->CHG[2]           = (1 << 6) | (1 << 9);							// the ppi CHG[0] contain chn0 and chn2
+    //NRF_PPI->TASKS_CHG[2].DIS = 1;													// here the group is disabled
+    //NRF_PPI->CHG[2]           = (1 << 6) | (1 << 9);							// the ppi CHG[0] contain chn0 and chn2
 
     //led toggle
-    NRF_PPI->CH[8].EEP = (uint32_t) &NRF_TIMER4->EVENTS_COMPARE[0];  // for led
-    NRF_PPI->CH[8].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[0];  //Action on pin is configured in CONFIG[0].POLARITY
-    NRF_PPI->CHENSET   = PPI_CHENSET_CH0_Msk;
-
+    //NRF_PPI->CHENCLR      = (1 << 8);
+    //NRF_PPI->CH[8].EEP = (uint32_t) &NRF_TIMER4->EVENTS_COMPARE[0];  // for led
+    //NRF_PPI->CH[8].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[0];  //Action on pin is configured in CONFIG[0].POLARITY
+    //NRF_PPI->CHENSET   = PPI_CHENSET_CH8_Msk; // enable channel8
+*/
     // timer4
     NRF_TIMER4->TASKS_STOP  = 1;
     NRF_TIMER4->TASKS_CLEAR = 1;
     NRF_TIMER4->PRESCALER   = 8;
     NRF_TIMER4->BITMODE     = TIMER_BITMODE_BITMODE_16Bit << TIMER_BITMODE_BITMODE_Pos;		//16 bit timer
-    NRF_TIMER4->CC[0]       = 0xFFFF;
+    NRF_TIMER4->MODE     	= TIMER_MODE_MODE_Counter << TIMER_MODE_MODE_Pos;
+    NRF_TIMER4->CC[0]       = 100;
     //NRF_TIMER4->CC[1]       = 0;
     NRF_TIMER4->SHORTS      = TIMER_SHORTS_COMPARE0_CLEAR_Msk;
-
     NRF_TIMER4->EVENTS_COMPARE[0] = 0; //这句话是干什么？
     NRF_TIMER4->TASKS_START = 1;
 
-*/ //for test end
+//for test end
 
     NRF_TIMER2->TASKS_START = 1;  //开启timer2
 

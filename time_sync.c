@@ -48,8 +48,9 @@ static volatile bool m_timer_update_in_progress = false;
 volatile uint32_t m_test_count = 0;
 volatile uint32_t m_rcv_count = 0;
 
-volatile uint32_t haha = 0;
-volatile bool hahaha = true;
+//volatile uint32_t haha = 0;
+volatile bool alreadyinsync = false;
+volatile bool testppienabled = false;
 
 static volatile struct
 {
@@ -370,7 +371,7 @@ void timeslot_begin_handler(void)
     }
 
     
-// 那也就是说只有当 m_radio_state == RADIO_STATE_TX  时才会执行下面的语句？
+// 那也就是说只有当 m_radio_state == RADIO_STATE_TX  时才会执行下面的语句？yes!
     update_radio_parameters();
     
     //here to re-configure ppi for TX mode, "ppi_configure" is configured for RX mode.
@@ -495,6 +496,7 @@ void SWI3_EGU3_IRQHandler(void)						// I don't know what it is used for
         m_timer_update_in_progress = false;
     }
 
+    /*
     if (NRF_EGU3->EVENTS_TRIGGERED[1] != 0)
         {
             NRF_EGU3->EVENTS_TRIGGERED[1] = 0;
@@ -517,7 +519,7 @@ void SWI3_EGU3_IRQHandler(void)						// I don't know what it is used for
             }
             haha++;
             //NRF_LOG_INFO("679 be cleared\r\n");
-        }
+        }*/
 }
 
 /*
@@ -549,13 +551,18 @@ static inline void sync_timer_offset_compensate(void)
     }
     
     //if (timer_offset == 0 ||timer_offset == TIMER_MAX_VAL) // this one is original
-    if (timer_offset < 100 ||timer_offset > (TIMER_MAX_VAL-10))
+    if (timer_offset < 10 || timer_offset > (TIMER_MAX_VAL-10))
     {
 //        NRF_GPIO->OUT ^= (1 << 25);
+    	alreadyinsync = true;
     	NRF_LOG_INFO("already in sync\r\n");
-        return;
+        //return;
+    }else{
+    	//alreadyinsync = false;  //去掉这句，already in sync 后就再也不会变为false了。
     }
     
+	if(!alreadyinsync)
+	{
     // Write offset to timer compare register
     m_params.high_freq_timer[0]->CC[2] = (TIMER_MAX_VAL - timer_offset);
     
@@ -564,6 +571,29 @@ static inline void sync_timer_offset_compensate(void)
     // Enable PPI channels
     NRF_PPI->CHENSET = m_ppi_chen_mask;
     NRF_LOG_INFO("m_ppi_chen_mask be set\r\n");
+	}
+	else
+	{
+    	if(!testppienabled)
+    	{
+    	NRF_PPI->CHENCLR      = (1 << 6);
+        NRF_PPI->CH[6].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];
+        NRF_PPI->CH[6].TEP = (uint32_t) &NRF_TIMER4->TASKS_COUNT;
+        NRF_PPI->CHENSET   = PPI_CHENSET_CH6_Msk;
+
+        testppienabled = true;
+
+        NRF_PPI->CHENCLR      = (1 << 7);
+        NRF_PPI->CH[7].EEP = (uint32_t) &NRF_TIMER4->EVENTS_COMPARE[0];
+        NRF_PPI->CH[7].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[0];
+        NRF_PPI->CHENSET      = (1 << 7);
+
+        NRF_PPI->CHENCLR      = (1 << 8);
+        NRF_PPI->CH[8].EEP = (uint32_t) &NRF_TIMER4->EVENTS_COMPARE[0];
+        NRF_PPI->CH[8].TEP = (uint32_t) &NRF_TIMER4->TASKS_CLEAR;
+        NRF_PPI->CHENSET      = (1 << 8);
+    	}
+    }
 }
 
 static void ppi_configure(void)		//A3;B3												// in this function, only configuration, not enable, CHENSET is enable
