@@ -321,6 +321,7 @@ void GPIOTE_IRQHandler(void) //作者添加的
             NRF_LOG_INFO("Button3 is pressed\r\n");
             if(!buttonthreealready)
             {
+/*
             		NRF_PPI->CHENCLR      = (1 << 6);
                     NRF_PPI->CH[6].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];
                     NRF_PPI->CH[6].TEP = (uint32_t) &NRF_TIMER4->TASKS_COUNT;
@@ -335,7 +336,7 @@ void GPIOTE_IRQHandler(void) //作者添加的
                     NRF_PPI->CH[8].EEP = (uint32_t) &NRF_TIMER4->EVENTS_COMPARE[0];
                     NRF_PPI->CH[8].TEP = (uint32_t) &NRF_TIMER4->TASKS_CLEAR;
                     NRF_PPI->CHENSET      = (1 << 8);
-
+*/
                     buttonthreealready = true;
             }
 
@@ -392,16 +393,16 @@ static void sync_timer_button_init(void) //作者添加的
     NVIC_EnableIRQ(GPIOTE_IRQn); // 6 为GPIOTE interupt
 
 
-/*for test
+//for test
+    NRF_PPI->CHENCLR      = (1 << 0);
+    NRF_PPI->CH[0].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];
+    NRF_PPI->CH[0].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[0];
+    NRF_PPI->CHENSET   = PPI_CHENSET_CH0_Msk;
 
+/*
     //NRF_PPI->CH[0].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];  // timer2 cc[3] is for debugging
     //NRF_PPI->CH[0].TEP = (uint32_t) &NRF_EGU3->TASKS_TRIGGER[1];  //Action on pin is configured in CONFIG[0].POLARITY
     //NRF_PPI->CHENSET   = (1 << 0);
-
-
-    //NRF_PPI->CH[0].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];
-    //NRF_PPI->CH[0].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[0];
-    //NRF_PPI->CHENSET   = PPI_CHENSET_CH0_Msk;
 
     //NRF_PPI->CHENCLR      = (1 << 6);
     //NRF_PPI->CH[6].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];
@@ -426,18 +427,19 @@ static void sync_timer_button_init(void) //作者添加的
     //NRF_PPI->CH[8].EEP = (uint32_t) &NRF_TIMER4->EVENTS_COMPARE[0];  // for led
     //NRF_PPI->CH[8].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[0];  //Action on pin is configured in CONFIG[0].POLARITY
     //NRF_PPI->CHENSET   = PPI_CHENSET_CH8_Msk; // enable channel8
-*/
+
     // timer4
     NRF_TIMER4->TASKS_STOP  = 1;
     NRF_TIMER4->TASKS_CLEAR = 1;
     NRF_TIMER4->PRESCALER   = 8;
     NRF_TIMER4->BITMODE     = TIMER_BITMODE_BITMODE_16Bit << TIMER_BITMODE_BITMODE_Pos;		//16 bit timer
-    NRF_TIMER4->MODE     	= TIMER_MODE_MODE_Counter << TIMER_MODE_MODE_Pos;
-    NRF_TIMER4->CC[0]       = 100;
+    //NRF_TIMER4->MODE     	= TIMER_MODE_MODE_Counter << TIMER_MODE_MODE_Pos;
+    NRF_TIMER4->CC[0]       = 0xFFFF;
     //NRF_TIMER4->CC[1]       = 0;
     NRF_TIMER4->SHORTS      = TIMER_SHORTS_COMPARE0_CLEAR_Msk;
     NRF_TIMER4->EVENTS_COMPARE[0] = 0; //这句话是干什么？
     NRF_TIMER4->TASKS_START = 1;
+*/
 
 //for test end
 

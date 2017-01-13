@@ -14,7 +14,7 @@
 #elif defined ( __ICCARM__ )
 #define TX_CHAIN_DELAY_PRESCALER_0 703
 #elif defined ( __GNUC__ )
-#define TX_CHAIN_DELAY_PRESCALER_0 704
+#define TX_CHAIN_DELAY_PRESCALER_0 0 //原值＝704
 #endif
 
 #define SYNC_TIMER_PRESCALER 0
@@ -50,7 +50,6 @@ volatile uint32_t m_rcv_count = 0;
 
 //volatile uint32_t haha = 0;
 volatile bool alreadyinsync = false;
-volatile bool testppienabled = false;
 
 static volatile struct
 {
@@ -471,7 +470,7 @@ static void sync_timer_start(void)		// 		实际是NRF_TIMER2，定义的名字�
 {
     m_params.high_freq_timer[0]->TASKS_STOP  = 1;
     m_params.high_freq_timer[0]->TASKS_CLEAR = 1;
-    m_params.high_freq_timer[0]->PRESCALER   = SYNC_TIMER_PRESCALER;
+    m_params.high_freq_timer[0]->PRESCALER   = 8;
     m_params.high_freq_timer[0]->BITMODE     = TIMER_BITMODE_BITMODE_16Bit << TIMER_BITMODE_BITMODE_Pos;		//16 bit timer
     m_params.high_freq_timer[0]->CC[0]       = TIMER_MAX_VAL;
     m_params.high_freq_timer[0]->CC[3]       = TIMER_MAX_VAL; // Only used for debugging purposes such as pin toggling
@@ -572,28 +571,6 @@ static inline void sync_timer_offset_compensate(void)
     NRF_PPI->CHENSET = m_ppi_chen_mask;
     NRF_LOG_INFO("m_ppi_chen_mask be set\r\n");
 	}
-	else
-	{
-    	if(!testppienabled)
-    	{
-    	NRF_PPI->CHENCLR      = (1 << 6);
-        NRF_PPI->CH[6].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];
-        NRF_PPI->CH[6].TEP = (uint32_t) &NRF_TIMER4->TASKS_COUNT;
-        NRF_PPI->CHENSET   = PPI_CHENSET_CH6_Msk;
-
-        testppienabled = true;
-
-        NRF_PPI->CHENCLR      = (1 << 7);
-        NRF_PPI->CH[7].EEP = (uint32_t) &NRF_TIMER4->EVENTS_COMPARE[0];
-        NRF_PPI->CH[7].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[0];
-        NRF_PPI->CHENSET      = (1 << 7);
-
-        NRF_PPI->CHENCLR      = (1 << 8);
-        NRF_PPI->CH[8].EEP = (uint32_t) &NRF_TIMER4->EVENTS_COMPARE[0];
-        NRF_PPI->CH[8].TEP = (uint32_t) &NRF_TIMER4->TASKS_CLEAR;
-        NRF_PPI->CHENSET      = (1 << 8);
-    	}
-    }
 }
 
 static void ppi_configure(void)		//A3;B3												// in this function, only configuration, not enable, CHENSET is enable
