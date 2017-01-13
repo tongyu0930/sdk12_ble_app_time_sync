@@ -1,9 +1,7 @@
 #include "time_sync.h"
-
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
-
 #include "app_error.h"
 #include "nrf.h"
 #include "nrf_error.h"
@@ -27,13 +25,11 @@
 #else
 #error Invalid prescaler value
 #endif
-
   
 #define TS_LEN_US                            (1000UL)
 #define TX_LEN_EXTENSION_US                  (1000UL)
 #define TS_SAFETY_MARGIN_US                  (500UL)    /**< The timeslot activity should be finished with this much to spare. */
 #define TS_EXTEND_MARGIN_US                  (700UL)   /**< The timeslot activity should request an extension this long before end of timeslot. */
-
 
 #define MAIN_DEBUG                           0x12345678UL
 
@@ -540,20 +536,20 @@ static inline void sync_timer_offset_compensate(void)
     }
 
     peer_timer  = m_sync_pkt.timer_val;
-    peer_timer += TX_CHAIN_DELAY;									//TX_CHAIN_DELAY怎么就magical了？干什么用的？
+    peer_timer += TX_CHAIN_DELAY; // magic value
     local_timer = m_params.high_freq_timer[0]->CC[1];   //cc1 was captured in "timeslot begin handler"
     
     if (local_timer > peer_timer)
     {
-        timer_offset = TIMER_MAX_VAL - local_timer + peer_timer;    //TIMER_MAX_VAL = 2^16 = 65536  //为什么与timer的最大值有关系？不理解
+        timer_offset = TIMER_MAX_VAL - local_timer + peer_timer;    //TIMER_MAX_VAL = 2^16 = 65536
     }
     else
     {
         timer_offset = peer_timer - local_timer;
     }
     
-    if (timer_offset == 0 ||
-        timer_offset == TIMER_MAX_VAL)
+    //if (timer_offset == 0 ||timer_offset == TIMER_MAX_VAL) // this one is original
+    if (timer_offset < 100 ||timer_offset > (TIMER_MAX_VAL-10))
     {
 //        NRF_GPIO->OUT ^= (1 << 25);
     	NRF_LOG_INFO("already in sync\r\n");
@@ -659,7 +655,7 @@ uint32_t ts_enable(void)	//A1;B1			// 这个function运行完后就待命了。
     ppi_configure();	//A3;B3
     
     NVIC_ClearPendingIRQ(m_params.egu_irq_type);
-    NVIC_SetPriority(m_params.egu_irq_type, 2);
+    NVIC_SetPriority(m_params.egu_irq_type, 7);
     NVIC_EnableIRQ(m_params.egu_irq_type);
     
     m_params.egu->INTENSET = EGU_INTENSET_TRIGGERED0_Msk; 				//Enable interrupt for TRIGGERED[0] event
