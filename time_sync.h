@@ -29,7 +29,7 @@ void ts_on_sys_evt(uint32_t sys_evt);
  *
  * @retval NRF_SUCCESS if successful
  */
-uint32_t ts_enable(const ts_params_t * p_params);
+uint32_t ts_enable(void);
 
 /**@brief Disable time sync library. 
  *

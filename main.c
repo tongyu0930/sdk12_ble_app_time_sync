@@ -217,41 +217,39 @@ void GPIOTE_IRQHandler(void)
     uint32_t err_code;
     bool debouncing = false;
 
-    if (NRF_GPIOTE->EVENTS_IN[1] != 0)
+    if (NRF_GPIOTE->EVENTS_IN[1] != 0) // button1 实现timesync广播的开启和关闭
     {
         nrf_delay_us(2000);
 
-        NRF_GPIOTE->EVENTS_IN[1] = 0;
+        NRF_GPIOTE->EVENTS_IN[1] = 0; // 这句话是为了防止按键一直被按着，如果没有这句话，handler就会一直被call
 
         if (m_send_sync_pkt)
         {
             m_send_sync_pkt  = false;
-            //NRF_GPIO->OUTSET = LEDS_MASK;
-            NRF_GPIO->OUTSET = BSP_LED_1_MASK;
 
             err_code = ts_tx_stop();
             APP_ERROR_CHECK(err_code);
+            NRF_GPIO->OUTSET = BSP_LED_1_MASK; // if ts_tx_stop, LED2 will be off
 
             NRF_LOG_INFO("Stopping sync beacon transmission!\r\n");
         }
         else
         {
             m_send_sync_pkt  = true;
-            //NRF_GPIO->OUTCLR = LEDS_MASK;
-            NRF_GPIO->OUTCLR = BSP_LED_1_MASK;
 
             err_code = ts_tx_start(100);
             APP_ERROR_CHECK(err_code);
+            NRF_GPIO->OUTCLR = BSP_LED_1_MASK; // if ts_tx_start, LED2 will be off
 
             NRF_LOG_INFO("Starting sync beacon transmission!\r\n");
         }
     }
 
-    if (NRF_GPIOTE->EVENTS_IN[2] != 0)	// button2 实现广播的开启和关闭
+    if (NRF_GPIOTE->EVENTS_IN[2] != 0) // button2 实现广播的开启和关闭
     {
     	nrf_delay_us(2000);
 
-        NRF_GPIOTE->EVENTS_IN[2] = 0;
+        NRF_GPIOTE->EVENTS_IN[2] = 0; // 这句话是为了防止按键一直被按着，如果没有这句话，handler就会一直被call
 
         if (m_advertising_running)
         {
@@ -285,130 +283,53 @@ void GPIOTE_IRQHandler(void)
 }
 
 
-static void sync_timer_button_init(void)
+static void gpio_configure(void)
 {
-    uint32_t       err_code;
-    uint8_t        rf_address[5] = {0xDE, 0xAD, 0xBE, 0xEF, 0x19};						//这是干嘛的？
-    ts_params_t    ts_params;
+	NRF_GPIO->DIRSET = LEDS_MASK; // set register
+	NRF_GPIO->OUTSET = LEDS_MASK; // clear register
 
-    NRF_GPIO->DIRSET = LEDS_MASK;
-    NRF_GPIO->OUTSET = LEDS_MASK;
+	NRF_GPIO->PIN_CNF[BUTTON_1] = (GPIO_PIN_CNF_DIR_Input     << GPIO_PIN_CNF_DIR_Pos)   |
+								  (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
+								  (GPIO_PIN_CNF_PULL_Pullup   << GPIO_PIN_CNF_PULL_Pos);
 
-    NRF_GPIO->PIN_CNF[BUTTON_1] = (GPIO_PIN_CNF_DIR_Input     << GPIO_PIN_CNF_DIR_Pos)   |
-                                  (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
-                                  (GPIO_PIN_CNF_PULL_Pullup   << GPIO_PIN_CNF_PULL_Pos);
+	NRF_GPIO->PIN_CNF[BUTTON_2] = (GPIO_PIN_CNF_DIR_Input     << GPIO_PIN_CNF_DIR_Pos)   |
+								  (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
+								  (GPIO_PIN_CNF_PULL_Pullup   << GPIO_PIN_CNF_PULL_Pos);
 
-    NRF_GPIO->PIN_CNF[BUTTON_2] = (GPIO_PIN_CNF_DIR_Input     << GPIO_PIN_CNF_DIR_Pos)   |
-                                  (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
-                                  (GPIO_PIN_CNF_PULL_Pullup   << GPIO_PIN_CNF_PULL_Pos);
+	NRF_GPIO->PIN_CNF[BUTTON_3] = (GPIO_PIN_CNF_DIR_Input     << GPIO_PIN_CNF_DIR_Pos)   |
+								  (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
+								  (GPIO_PIN_CNF_PULL_Pullup   << GPIO_PIN_CNF_PULL_Pos);
 
-    NRF_GPIO->PIN_CNF[BUTTON_3] = (GPIO_PIN_CNF_DIR_Input     << GPIO_PIN_CNF_DIR_Pos)   |
-                                  (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
-                                  (GPIO_PIN_CNF_PULL_Pullup   << GPIO_PIN_CNF_PULL_Pos);
+	nrf_delay_us(5000);																			// Do I have to delay?
 
-    nrf_delay_us(5000);		// Do I have to delay?
+	NRF_GPIOTE->CONFIG[0] = (GPIOTE_CONFIG_MODE_Task       << GPIOTE_CONFIG_MODE_Pos)     |
+							(GPIOTE_CONFIG_OUTINIT_High    << GPIOTE_CONFIG_OUTINIT_Pos)  |
+							(GPIOTE_CONFIG_POLARITY_Toggle << GPIOTE_CONFIG_POLARITY_Pos) |
+							(19                            << GPIOTE_CONFIG_PSEL_Pos);			// 19 is the pin number for testing
 
-    NRF_GPIOTE->CONFIG[0] = (GPIOTE_CONFIG_MODE_Task       << GPIOTE_CONFIG_MODE_Pos)     |
-                            (GPIOTE_CONFIG_OUTINIT_High    << GPIOTE_CONFIG_OUTINIT_Pos)  |
-                            (GPIOTE_CONFIG_POLARITY_Toggle << GPIOTE_CONFIG_POLARITY_Pos) |
-                            (19                            << GPIOTE_CONFIG_PSEL_Pos);			// 19 is the pin number for testing
+	NRF_GPIOTE->CONFIG[1] = (GPIOTE_CONFIG_MODE_Event      << GPIOTE_CONFIG_MODE_Pos)     |
+							(GPIOTE_CONFIG_OUTINIT_Low     << GPIOTE_CONFIG_OUTINIT_Pos)  |
+							(GPIOTE_CONFIG_POLARITY_HiToLo << GPIOTE_CONFIG_POLARITY_Pos) |
+							(BUTTON_1                      << GPIOTE_CONFIG_PSEL_Pos);
 
-    NRF_GPIOTE->CONFIG[1] = (GPIOTE_CONFIG_MODE_Event      << GPIOTE_CONFIG_MODE_Pos)     |
-                            (GPIOTE_CONFIG_OUTINIT_Low     << GPIOTE_CONFIG_OUTINIT_Pos)  |
-                            (GPIOTE_CONFIG_POLARITY_HiToLo << GPIOTE_CONFIG_POLARITY_Pos) |
-                            (BUTTON_1                      << GPIOTE_CONFIG_PSEL_Pos);
+	NRF_GPIOTE->CONFIG[2] = (GPIOTE_CONFIG_MODE_Event      << GPIOTE_CONFIG_MODE_Pos)     |
+							(GPIOTE_CONFIG_OUTINIT_Low     << GPIOTE_CONFIG_OUTINIT_Pos)  |
+							(GPIOTE_CONFIG_POLARITY_HiToLo << GPIOTE_CONFIG_POLARITY_Pos) |
+							(BUTTON_2                      << GPIOTE_CONFIG_PSEL_Pos);
 
-    NRF_GPIOTE->CONFIG[2] = (GPIOTE_CONFIG_MODE_Event      << GPIOTE_CONFIG_MODE_Pos)     |
-                            (GPIOTE_CONFIG_OUTINIT_Low     << GPIOTE_CONFIG_OUTINIT_Pos)  |
-                            (GPIOTE_CONFIG_POLARITY_HiToLo << GPIOTE_CONFIG_POLARITY_Pos) |
-                            (BUTTON_2                      << GPIOTE_CONFIG_PSEL_Pos);
+	// 自己加的，button3未利用
+	NRF_GPIOTE->CONFIG[3] = (GPIOTE_CONFIG_MODE_Event      << GPIOTE_CONFIG_MODE_Pos)     |
+							(GPIOTE_CONFIG_OUTINIT_Low     << GPIOTE_CONFIG_OUTINIT_Pos)  |
+							(GPIOTE_CONFIG_POLARITY_HiToLo << GPIOTE_CONFIG_POLARITY_Pos) |
+							(BUTTON_3                      << GPIOTE_CONFIG_PSEL_Pos);
 
-    NRF_GPIOTE->CONFIG[3] = (GPIOTE_CONFIG_MODE_Event      << GPIOTE_CONFIG_MODE_Pos)     |
-                            (GPIOTE_CONFIG_OUTINIT_Low     << GPIOTE_CONFIG_OUTINIT_Pos)  |
-                            (GPIOTE_CONFIG_POLARITY_HiToLo << GPIOTE_CONFIG_POLARITY_Pos) |
-                            (BUTTON_3                      << GPIOTE_CONFIG_PSEL_Pos);
+	// Interrupt
+	NRF_GPIOTE->INTENSET = GPIOTE_INTENSET_IN1_Msk | GPIOTE_INTENSET_IN2_Msk | GPIOTE_INTENSET_IN3_Msk;
+	NVIC_ClearPendingIRQ(GPIOTE_IRQn);
+	NVIC_SetPriority(GPIOTE_IRQn, APP_IRQ_PRIORITY_LOWEST);
+	NVIC_EnableIRQ(GPIOTE_IRQn); 											 					//declaration值得一看！！！有关IRQ
 
-    NRF_GPIOTE->INTENSET = GPIOTE_INTENSET_IN1_Msk | GPIOTE_INTENSET_IN2_Msk | GPIOTE_INTENSET_IN3_Msk;
-
-    NVIC_ClearPendingIRQ(GPIOTE_IRQn);
-    NVIC_SetPriority(GPIOTE_IRQn, APP_IRQ_PRIORITY_LOWEST);
-    NVIC_EnableIRQ(GPIOTE_IRQn); 																//declaration值得一看！！！有关IRQ
-
-
-//for test start
-
-    NRF_PPI->CHENCLR      = (1 << 0);
-    NRF_PPI->CH[0].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];
-    NRF_PPI->CH[0].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[0];
-    NRF_PPI->CHENSET   = PPI_CHENSET_CH0_Msk;
-
-/*
-    //NRF_PPI->CH[0].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];  // timer2 cc[3] is for debugging
-    //NRF_PPI->CH[0].TEP = (uint32_t) &NRF_EGU3->TASKS_TRIGGER[1];  //Action on pin is configured in CONFIG[0].POLARITY
-    //NRF_PPI->CHENSET   = (1 << 0);
-
-    //NRF_PPI->CHENCLR      = (1 << 6);
-    //NRF_PPI->CH[6].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];
-    //NRF_PPI->CH[6].TEP = (uint32_t) &NRF_TIMER4->TASKS_CLEAR;//清零timer
-
-    // PPI channel 7: disable PPI channel 6 such that the timer is only reset once.
-    //NRF_PPI->CHENCLR      = (1 << 7);
-    //NRF_PPI->CH[7].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3]; //这个是说把channel0的eep设为timer0的compare event
-    //NRF_PPI->CH[7].TEP = (uint32_t) &NRF_PPI->TASKS_CHG[2].DIS;  					// TEP is 'disable ppi group'
-
-    //egu
-    //NRF_PPI->CHENCLR      = (1 << 9);
-    //NRF_PPI->CH[9].EEP = (uint32_t) &NRF_TIMER2->EVENTS_COMPARE[3];
-    //NRF_PPI->CH[9].TEP = (uint32_t) &NRF_EGU3->TASKS_TRIGGER[1];					// Here 'egu' appears
-
-    // PPI group
-    //NRF_PPI->TASKS_CHG[2].DIS = 1;													// here the group is disabled
-    //NRF_PPI->CHG[2]           = (1 << 6) | (1 << 9);							// the ppi CHG[0] contain chn0 and chn2
-
-    //led toggle
-    //NRF_PPI->CHENCLR      = (1 << 8);
-    //NRF_PPI->CH[8].EEP = (uint32_t) &NRF_TIMER4->EVENTS_COMPARE[0];  // for led
-    //NRF_PPI->CH[8].TEP = (uint32_t) &NRF_GPIOTE->TASKS_OUT[0];  //Action on pin is configured in CONFIG[0].POLARITY
-    //NRF_PPI->CHENSET   = PPI_CHENSET_CH8_Msk; // enable channel8
-
-    // timer4
-    NRF_TIMER4->TASKS_STOP  = 1;
-    NRF_TIMER4->TASKS_CLEAR = 1;
-    NRF_TIMER4->PRESCALER   = 8;
-    NRF_TIMER4->BITMODE     = TIMER_BITMODE_BITMODE_16Bit << TIMER_BITMODE_BITMODE_Pos;		//16 bit timer
-    //NRF_TIMER4->MODE     	= TIMER_MODE_MODE_Counter << TIMER_MODE_MODE_Pos;
-    NRF_TIMER4->CC[0]       = 0xFFFF;
-    //NRF_TIMER4->CC[1]       = 0;
-    NRF_TIMER4->SHORTS      = TIMER_SHORTS_COMPARE0_CLEAR_Msk;
-    NRF_TIMER4->EVENTS_COMPARE[0] = 0; //这句话是干什么？
-    NRF_TIMER4->TASKS_START = 1;
-*/
-
-//for test end
-
-    NRF_TIMER2->TASKS_START = 1;  //开启timer2
-
-    // 为什么要有parameter这个结构体，是为了让动用了哪些peripheral一目了然。
-    ts_params.high_freq_timer[0] = NRF_TIMER2;
-    ts_params.high_freq_timer[1] = NRF_TIMER3;
-    ts_params.rtc             = NRF_RTC1;
-    ts_params.egu             = NRF_EGU3;
-    ts_params.egu_irq_type    = SWI3_EGU3_IRQn;
-    ts_params.ppi_chhg        = 0; // PPI Channel Group
-    ts_params.ppi_chns[0]     = 1;
-    ts_params.ppi_chns[1]     = 2;
-    ts_params.ppi_chns[2]     = 3;
-    ts_params.ppi_chns[3]     = 4;
-    ts_params.rf_chn          = 125;
-    memcpy(ts_params.rf_addr, rf_address, sizeof(rf_address));
-
-    err_code = ts_enable(&ts_params);
-    APP_ERROR_CHECK(err_code);
-
-    NRF_LOG_INFO("Started listening for beacons.\r\n");
-    NRF_LOG_INFO("Press Button 1 to start sending sync beacons\r\n");
 }
-
 
 /**
  * @brief Function for application main entry.
@@ -443,7 +364,11 @@ int main(void)
     err_code = app_timer_start(m_sync_count_timer_id, SYNC_BEACON_COUNT_PRINTOUT_INTERVAL, NULL); // 每1000ms就触发一次handler
     APP_ERROR_CHECK(err_code);
 
-    sync_timer_button_init();
+    gpio_configure(); // 注意gpio和timesync是相对独立的，同步时钟本质上不需要gpio
+
+    err_code = ts_enable();
+    APP_ERROR_CHECK(err_code);
+
 
     // Enter main loop.
     for (;; )
