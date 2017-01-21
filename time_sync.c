@@ -13,12 +13,12 @@
 #include "nrf_soc.h"
 #include "nrf_sdm.h"
 
-#define TX_CHAIN_DELAY_PRESCALER_0 0 //原值＝704		这个数值需要调试
-#define SYNC_TIMER_PRESCALER 0
-#define SYNC_RTC_PRESCALER 0
+#define TX_CHAIN_DELAY_PRESCALER_0 		0 //原值＝704		这个数值需要调试
+#define SYNC_TIMER_PRESCALER 			0
+#define SYNC_RTC_PRESCALER 				0
 
-#if SYNC_TIMER_PRESCALER == 0
-#define TX_CHAIN_DELAY TX_CHAIN_DELAY_PRESCALER_0
+#if SYNC_TIMER_PRESCALER 				== 0
+#define TX_CHAIN_DELAY 					TX_CHAIN_DELAY_PRESCALER_0
 #else
 #error Invalid prescaler value
 #endif
@@ -131,6 +131,11 @@ if (m_radio_state==RADIO_STATE_RX && (NRF_RADIO->CRCSTATUS & RADIO_CRCSTATUS_CRC
 
 
 /**@brief   Function for handling timeslot events.
+     "radio_callback"
+     will be called when the radio timeslot starts. From this point the NRF_RADIO and NRF_TIMER0 peripherals can be freely accessed by the application.
+     is called whenever the NRF_TIMER0 interrupt occurs.
+     is called whenever the NRF_RADIO interrupt occurs.
+     will be called at ARM interrupt priority level 0. This implies that none of the sd_* API calls can be used from p_radio_signal_callback().
  */
 static nrf_radio_signal_callback_return_param_t * radio_callback (uint8_t signal_type) // This callback runs at lower-stack priority(the highest priority possible).
 {
@@ -159,7 +164,6 @@ static nrf_radio_signal_callback_return_param_t * radio_callback (uint8_t signal
         NRF_TIMER0->BITMODE             = (TIMER_BITMODE_BITMODE_24Bit << TIMER_BITMODE_BITMODE_Pos);//把 timer0 设置为 24bit，TIMER0 is pre-configured for 1Mhz
         NRF_TIMER0->TASKS_START         = 1;														   // start timer0
     
-
         NRF_RADIO->POWER                = (RADIO_POWER_POWER_Enabled << RADIO_POWER_POWER_Pos);		// turn on radio
 
         NVIC_EnableIRQ(TIMER0_IRQn); // turn on NRF_TIMER0 interrupt   // 这样NRF_RADIO_CALLBACK_SIGNAL_TYPE_TIMER0 就可以发生了。
@@ -463,20 +467,6 @@ void ts_on_sys_evt(uint32_t sys_evt)
     }
 }
 
-static void sync_timer_start(void)		     //实际是NRF_TIMER2，定义的名字叫high_freq_timer[0]，这个就是被同步的timer
-{
-    m_params.high_freq_timer[0]->TASKS_STOP  = 1;
-    m_params.high_freq_timer[0]->TASKS_CLEAR = 1;
-    m_params.high_freq_timer[0]->PRESCALER   = 8; // 原值为：SYNC_TIMER_PRESCALER
-    m_params.high_freq_timer[0]->BITMODE     = TIMER_BITMODE_BITMODE_16Bit << TIMER_BITMODE_BITMODE_Pos;		//16 bit timer
-    m_params.high_freq_timer[0]->CC[0]       = TIMER_MAX_VAL;
-    m_params.high_freq_timer[0]->CC[3]       = TIMER_MAX_VAL; // Only used for debugging purposes such as pin toggling
-    m_params.high_freq_timer[0]->SHORTS      = TIMER_SHORTS_COMPARE0_CLEAR_Msk | TIMER_SHORTS_COMPARE3_CLEAR_Msk;
-    m_params.high_freq_timer[0]->TASKS_START = 1;
-    NRF_LOG_INFO("timer2 started\r\n");
-
-    m_params.high_freq_timer[0]->EVENTS_COMPARE[3] = 0;
-}
 
 void SWI3_EGU3_IRQHandler(void)				// it is used to shut down thoses PPIs that is used for clear timer2's offset
 {
@@ -585,85 +575,68 @@ static void ppi_configure(void)	// in this function, only configuration, not ena
     NRF_PPI->CHG[chg]           = (1 << chn0) | (1 << chn2);							// the ppi CHG[0] contain chn0 and chn2
 }
 
-uint32_t ts_init(const ts_params_t * p_params)
-{
-    memcpy(&m_params, p_params, sizeof(ts_params_t));
-    
-    if (m_params.high_freq_timer[0] == 0 ||
-        m_params.rtc                == 0 ||
-        m_params.egu                == 0)
-    {
-        // TODO: Check all params
-        return NRF_ERROR_INVALID_PARAM;
-    }
-    
-    if (SYNC_RTC_PRESCALER != m_params.rtc->PRESCALER)
-    {
-        // TODO: Handle this
-        return NRF_ERROR_INVALID_STATE;
-    }
-    
-    return NRF_SUCCESS;
-}
 
-uint32_t ts_enable(void)
+uint32_t ts_enable(const ts_params_t * p_params) // 这个function返回error_code，所以类型是uint32_t
 {
     uint32_t err_code;
-    
-    if (m_timeslot_session_open)		// 这地方是true还是false ? 我觉得是 false
-    {
-        return NRF_ERROR_INVALID_STATE;
-    }
+
+    memcpy(&m_params, p_params, sizeof(ts_params_t)); // copy p_params to m_params
+
+    if (m_timeslot_session_open) { return NRF_ERROR_INVALID_STATE; } // 这地方是true还是false ? 我觉得是 false
     
     err_code = sd_clock_hfclk_request();
-    if (err_code != NRF_SUCCESS)
-    {
-        return err_code;
-    }
+    if (err_code != NRF_SUCCESS) { return err_code; }
     
-    err_code |= sd_power_mode_set(NRF_POWER_MODE_CONSTLAT); //Constant latency mode
-    if (err_code != NRF_SUCCESS)
-    {
-        return err_code;
-    }
+    err_code = sd_power_mode_set(NRF_POWER_MODE_CONSTLAT); //Constant latency mode // How about low power mode?
+    if (err_code != NRF_SUCCESS) { return err_code; }
 
+    /*
+     * "radio_callback"
+     * will be called when the radio timeslot starts. From this point the NRF_RADIO and NRF_TIMER0 peripherals can be freely accessed by the application.
+     * is called whenever the NRF_TIMER0 interrupt occurs.
+     * is called whenever the NRF_RADIO interrupt occurs.
+     * will be called at ARM interrupt priority level 0. This implies that none of the sd_* API calls can be used from p_radio_signal_callback().
+     */
     err_code = sd_radio_session_open(radio_callback); //Opens a session for radio timeslot requests
-    if (err_code != NRF_SUCCESS)
-    {
-        return err_code;
-    }
+    if (err_code != NRF_SUCCESS) { return err_code; }
 
-    err_code = sd_radio_request(&m_timeslot_req_earliest); //Requests a radio timeslot
-    if (err_code != NRF_SUCCESS)
-    {
-        return err_code;
-    }
+    err_code = sd_radio_request(&m_timeslot_req_earliest); // Requests a radio timeslot // 我觉得这就是开始timeslot，这句话完了之后radio callback里的第一个case就会被call
+    if (err_code != NRF_SUCCESS) { return err_code; }
     
-    ppi_configure();
+ppi_configure();
     
     NVIC_ClearPendingIRQ(m_params.egu_irq_type);
     NVIC_SetPriority(m_params.egu_irq_type, 7);
     NVIC_EnableIRQ(m_params.egu_irq_type);
     
-    m_params.egu->INTENSET = EGU_INTENSET_TRIGGERED0_Msk; 				//Enable interrupt for TRIGGERED[0] event
-    m_params.egu->INTENSET = EGU_INTENSET_TRIGGERED1_Msk;
+    m_params.egu->INTENSET 		= EGU_INTENSET_TRIGGERED0_Msk; 				//Enable interrupt for TRIGGERED[0] event
+    m_params.egu->INTENSET 		= EGU_INTENSET_TRIGGERED1_Msk;				//这个是我自己加的，当初为了测试
     
-    m_blocked_cancelled_count  = 0;
-    m_send_sync_pkt            = false;
-    m_radio_state              = RADIO_STATE_IDLE;
+    m_blocked_cancelled_count  	= 0;
+    m_send_sync_pkt            	= false;
+    m_radio_state              	= RADIO_STATE_IDLE;
     
-    sync_timer_start();
+			// start timer2 //实际是NRF_TIMER2，定义的名字叫high_freq_timer[0]，这个就是被同步的timer
+			m_params.high_freq_timer[0]->TASKS_STOP  = 1;
+			m_params.high_freq_timer[0]->TASKS_CLEAR = 1;
+			m_params.high_freq_timer[0]->PRESCALER   = 8; // 原值为：SYNC_TIMER_PRESCALER
+			m_params.high_freq_timer[0]->BITMODE     = TIMER_BITMODE_BITMODE_16Bit << TIMER_BITMODE_BITMODE_Pos;		//16 bit timer
+			m_params.high_freq_timer[0]->CC[0]       = TIMER_MAX_VAL;
+			m_params.high_freq_timer[0]->CC[3]       = TIMER_MAX_VAL; // Only used for debugging purposes such as pin toggling
+			m_params.high_freq_timer[0]->SHORTS      = TIMER_SHORTS_COMPARE0_CLEAR_Msk | TIMER_SHORTS_COMPARE3_CLEAR_Msk;
+			m_params.high_freq_timer[0]->TASKS_START = 1;
+			NRF_LOG_INFO("timer2 started\r\n");
+
+			m_params.high_freq_timer[0]->EVENTS_COMPARE[3] = 0; // 自己加的 我也不知道这到底是干什么的
     
-    m_timeslot_session_open    = true;
-    
-//    NRF_GPIO->DIRSET = (1 << 23);
-//    NRF_GPIO->DIRSET = (1 << 25);
+    m_timeslot_session_open    	= true;
     
     return NRF_SUCCESS;
 }
 
 uint32_t ts_disable(void)
 {
+
     return NRF_ERROR_NOT_SUPPORTED;
 }
 
@@ -672,10 +645,7 @@ uint32_t ts_tx_start(uint32_t sync_freq_hz)	// controlled by button
     uint32_t distance;
     
     distance = (1000000 / sync_freq_hz);
-    if (distance >= NRF_RADIO_DISTANCE_MAX_US)
-    {
-        return NRF_ERROR_INVALID_PARAM;
-    }
+    if (distance >= NRF_RADIO_DISTANCE_MAX_US) { return NRF_ERROR_INVALID_PARAM; }
     
     m_timeslot_distance = distance;
     

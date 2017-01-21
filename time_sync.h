@@ -24,19 +24,12 @@ typedef struct
 /**@brief SoftDevice system event handler. Must be called when a system event occurs */
 void ts_on_sys_evt(uint32_t sys_evt);
 
-/**@brief Initialize time sync library
- * 
- * @param[in] p_params Parameters
- *
- * @retval NRF_SUCCESS if successful 
- */
-uint32_t ts_init(const ts_params_t * p_params);
 
 /**@brief Enable time sync library. This will enable reception of sync packets.
  *
- * @retval NRF_SUCCESS if successful 
+ * @retval NRF_SUCCESS if successful
  */
-uint32_t ts_enable(void);
+uint32_t ts_enable(const ts_params_t * p_params);
 
 /**@brief Disable time sync library. 
  *

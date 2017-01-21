@@ -309,7 +309,7 @@ static void sync_timer_button_init(void)
     nrf_delay_us(5000);		// Do I have to delay?
 
     NRF_GPIOTE->CONFIG[0] = (GPIOTE_CONFIG_MODE_Task       << GPIOTE_CONFIG_MODE_Pos)     |
-                            (GPIOTE_CONFIG_OUTINIT_High     << GPIOTE_CONFIG_OUTINIT_Pos) |
+                            (GPIOTE_CONFIG_OUTINIT_High    << GPIOTE_CONFIG_OUTINIT_Pos)  |
                             (GPIOTE_CONFIG_POLARITY_Toggle << GPIOTE_CONFIG_POLARITY_Pos) |
                             (19                            << GPIOTE_CONFIG_PSEL_Pos);			// 19 is the pin number for testing
 
@@ -402,10 +402,7 @@ static void sync_timer_button_init(void)
     ts_params.rf_chn          = 125;
     memcpy(ts_params.rf_addr, rf_address, sizeof(rf_address));
 
-    err_code = ts_init(&ts_params);
-    APP_ERROR_CHECK(err_code);
-
-    err_code = ts_enable();
+    err_code = ts_enable(&ts_params);
     APP_ERROR_CHECK(err_code);
 
     NRF_LOG_INFO("Started listening for beacons.\r\n");
@@ -440,7 +437,7 @@ int main(void)
     APP_ERROR_CHECK(err_code);
 
     ble_stack_init();
-    //gpio_config();
+
     advertising_init();
 
     err_code = app_timer_start(m_sync_count_timer_id, SYNC_BEACON_COUNT_PRINTOUT_INTERVAL, NULL); // 每1000ms就触发一次handler
