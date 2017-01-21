@@ -12,8 +12,7 @@
 #include "nrf_log.h"
 #include "nrf_soc.h"
 #include "nrf_sdm.h"
-#include "boards.h"
-#include "app_util_platform.h"
+
 
 #define TX_CHAIN_DELAY_PRESCALER_0 		0 //原值＝704		这个数值需要调试
 #define SYNC_TIMER_PRESCALER 			0
@@ -37,7 +36,6 @@
 
 
 static volatile bool 	m_timeslot_session_open;
-volatile uint32_t    	m_blocked_cancelled_count;
 static uint32_t      	m_total_timeslot_length = 0;
 static uint32_t     	m_timeslot_distance = 0;
 static uint32_t     	m_ppi_chen_mask = 0;
@@ -45,8 +43,9 @@ static ts_params_t  	ts_params;
 static volatile bool 	m_send_sync_pkt = false;
 static volatile bool 	m_timer_update_in_progress = false;
 
-volatile uint32_t 		m_test_count = 0;
-volatile uint32_t 		m_rcv_count = 0;
+volatile uint32_t    	m_blocked_cancelled_count = 0;	// 这三个count有何意义？
+volatile uint32_t 					 m_test_count = 0;
+volatile uint32_t 					  m_rcv_count = 0;
 
 volatile bool alreadyinsync = false;
 

@@ -77,9 +77,10 @@ void assert_nrf_callback(uint16_t line_num, const uint8_t * p_file_name)
 }
 
 
-static void sync_beacon_count_printout_handler(void * p_context)  //这是APP TIMER's handler
+//这是APP TIMER's handler
+static void sync_beacon_count_printout_handler(void * p_context)
 {
-    extern volatile uint32_t m_test_count;	// 发出去多少个 packet
+    extern volatile uint32_t m_test_count;	// 发出去多少个 packet 									// 这三个count有何意义？
     extern volatile uint32_t m_rcv_count;	// 收到多少个  packet
     extern volatile uint32_t m_blocked_cancelled_count;
 
@@ -170,7 +171,7 @@ static void ble_evt_dispatch(ble_evt_t * p_ble_evt)
  */
 static void sys_evt_dispatch(uint32_t sys_evt)
 {
-    ts_on_sys_evt(sys_evt);  //作者添加的;
+    ts_on_sys_evt(sys_evt); // this function is in "time_sync.c"
 }
 
 
