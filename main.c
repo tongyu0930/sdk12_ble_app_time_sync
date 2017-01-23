@@ -56,8 +56,19 @@ static ble_gap_adv_params_t m_adv_params;   /**< Parameters to be passed to the 
 
 static bool                             m_advertising_running       = false;
 static bool 							m_send_sync_pkt 			= false;  // time_sync.c 里也有这个变量，是不是不是一回事？
+static bool 							ts_is_enabled 				= true;
 
 APP_TIMER_DEF(m_sync_count_timer_id);
+
+/*
+void HardFault_Handler(void)  //作者添加的
+{
+    uint32_t *sp = (uint32_t *) __get_MSP();
+    uint32_t ia = sp[24/4];
+    NRF_LOG_INFO("Hard Fault at address: 0x%08x\r\n", (unsigned int)ia);
+    while(1)
+        ;
+}*/
 
 
 /**@brief Callback function for asserts in the SoftDevice.
@@ -75,6 +86,59 @@ void assert_nrf_callback(uint16_t line_num, const uint8_t * p_file_name)
 {
     app_error_handler(DEAD_BEEF, line_num, p_file_name);
 }
+
+/*
+void app_error_fault_handler(uint32_t id, uint32_t pc, uint32_t info)  //作者添加的
+{
+    // static error variables - in order to prevent removal by optimizers
+    static volatile struct
+    {
+        uint32_t        fault_id;
+        uint32_t        pc;
+        uint32_t        error_info;
+        assert_info_t * p_assert_info;
+        error_info_t  * p_error_info;
+        ret_code_t      err_code;
+        uint32_t        line_num;
+        const uint8_t * p_file_name;
+    } m_error_data = {0};
+
+    // The following variable helps Keil keep the call stack visible, in addition, it can be set to
+    // 0 in the debugger to continue executing code after the error check.
+    volatile bool loop = true;
+    UNUSED_VARIABLE(loop);
+
+    m_error_data.fault_id   = id;
+    m_error_data.pc         = pc;
+    m_error_data.error_info = info;
+
+    switch (id)
+    {
+        case NRF_FAULT_ID_SDK_ASSERT:
+            m_error_data.p_assert_info = (assert_info_t *)info;
+            m_error_data.line_num      = m_error_data.p_assert_info->line_num;
+            m_error_data.p_file_name   = m_error_data.p_assert_info->p_file_name;
+            break;
+
+        case NRF_FAULT_ID_SDK_ERROR:
+            m_error_data.p_error_info = (error_info_t *)info;
+            m_error_data.err_code     = m_error_data.p_error_info->err_code;
+            m_error_data.line_num     = m_error_data.p_error_info->line_num;
+            m_error_data.p_file_name  = m_error_data.p_error_info->p_file_name;
+            break;
+    }
+
+    UNUSED_VARIABLE(m_error_data);
+
+    NRF_LOG_INFO("ASSERT\r\n\tError: 0x%08x\r\n\tLine: %d\r\n\tFile: %s\r\n", m_error_data.err_code, m_error_data.line_num, m_error_data.p_file_name);
+
+    // If printing is disrupted, remove the irq calls, or set the loop variable to 0 in the debugger.
+    __disable_irq();
+
+    while(loop);
+
+    __enable_irq();
+} */
 
 
 //这是APP TIMER's handler
@@ -169,7 +233,7 @@ static void ble_evt_dispatch(ble_evt_t * p_ble_evt)
  *
  * @param[in] sys_evt  System stack event.
  */
-static void sys_evt_dispatch(uint32_t sys_evt)
+static void sys_evt_dispatch(uint32_t sys_evt)														//这个function到底何时被call？
 {
     ts_on_sys_evt(sys_evt); // this function is in "time_sync.c"
 }
@@ -216,7 +280,6 @@ static void power_manage(void)
 void GPIOTE_IRQHandler(void)
 {
     uint32_t err_code;
-    bool debouncing = false;
 
     if (NRF_GPIOTE->EVENTS_IN[1] != 0) // button1 实现timesync广播的开启和关闭
     {
@@ -250,7 +313,7 @@ void GPIOTE_IRQHandler(void)
     {
     	nrf_delay_us(2000);
 
-        NRF_GPIOTE->EVENTS_IN[2] = 0; // 这句话是为了防止按键一直被按着，如果没有这句话，handler就会一直被call
+        NRF_GPIOTE->EVENTS_IN[2] = 0;
 
         if (m_advertising_running)
         {
@@ -273,14 +336,23 @@ void GPIOTE_IRQHandler(void)
 
         NRF_GPIOTE->EVENTS_IN[3] = 0;
 
-        NRF_LOG_INFO("Button3 was pressed\r\n");
-
-        if(!debouncing)
+        if(!ts_is_enabled)
         {
-            //TODO
-            //debouncing = true;
-        }
-     }
+            err_code = ts_enable();
+            APP_ERROR_CHECK(err_code);
+
+            NRF_LOG_INFO("ts enabled\r\n");
+
+            ts_is_enabled = true;
+        }else{
+            	err_code = ts_disable();
+            	APP_ERROR_CHECK(err_code);
+
+                NRF_LOG_INFO("ts disabled\r\n");
+
+                ts_is_enabled = false;
+         	 }
+    }
 }
 
 
@@ -298,6 +370,10 @@ static void gpio_configure(void)
 								  (GPIO_PIN_CNF_PULL_Pullup   << GPIO_PIN_CNF_PULL_Pos);
 
 	NRF_GPIO->PIN_CNF[BUTTON_3] = (GPIO_PIN_CNF_DIR_Input     << GPIO_PIN_CNF_DIR_Pos)   |
+								  (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
+								  (GPIO_PIN_CNF_PULL_Pullup   << GPIO_PIN_CNF_PULL_Pos);
+
+	NRF_GPIO->PIN_CNF[BUTTON_4] = (GPIO_PIN_CNF_DIR_Input     << GPIO_PIN_CNF_DIR_Pos)   |
 								  (GPIO_PIN_CNF_INPUT_Connect << GPIO_PIN_CNF_INPUT_Pos) |
 								  (GPIO_PIN_CNF_PULL_Pullup   << GPIO_PIN_CNF_PULL_Pos);
 
@@ -324,8 +400,13 @@ static void gpio_configure(void)
 							(GPIOTE_CONFIG_POLARITY_HiToLo << GPIOTE_CONFIG_POLARITY_Pos) |
 							(BUTTON_3                      << GPIOTE_CONFIG_PSEL_Pos);
 
+	NRF_GPIOTE->CONFIG[4] = (GPIOTE_CONFIG_MODE_Event      << GPIOTE_CONFIG_MODE_Pos)     |
+							(GPIOTE_CONFIG_OUTINIT_Low     << GPIOTE_CONFIG_OUTINIT_Pos)  |
+							(GPIOTE_CONFIG_POLARITY_HiToLo << GPIOTE_CONFIG_POLARITY_Pos) |
+							(BUTTON_4                      << GPIOTE_CONFIG_PSEL_Pos);
+
 	// Interrupt
-	NRF_GPIOTE->INTENSET = GPIOTE_INTENSET_IN1_Msk | GPIOTE_INTENSET_IN2_Msk | GPIOTE_INTENSET_IN3_Msk;
+	NRF_GPIOTE->INTENSET = GPIOTE_INTENSET_IN1_Msk | GPIOTE_INTENSET_IN2_Msk | GPIOTE_INTENSET_IN3_Msk | GPIOTE_INTENSET_IN4_Msk;
 	NVIC_ClearPendingIRQ(GPIOTE_IRQn);
 	NVIC_SetPriority(GPIOTE_IRQn, APP_IRQ_PRIORITY_LOWEST);
 	NVIC_EnableIRQ(GPIOTE_IRQn); 											 					//declaration值得一看！！！有关IRQ
@@ -341,6 +422,8 @@ int main(void)
 
     err_code = NRF_LOG_INIT(NULL);
     APP_ERROR_CHECK(err_code);
+
+    NRF_LOG_INFO("System Started!!!!!!.\r\n");
 
     APP_TIMER_INIT(APP_TIMER_PRESCALER, APP_TIMER_OP_QUEUE_SIZE, false); //(0,4,false)
     /*
@@ -366,6 +449,7 @@ int main(void)
     APP_ERROR_CHECK(err_code);
 
     gpio_configure(); // 注意gpio和timesync是相对独立的，同步时钟本质上不需要gpio
+
 
     err_code = ts_enable();
     APP_ERROR_CHECK(err_code);
