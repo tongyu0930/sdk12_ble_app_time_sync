@@ -115,11 +115,11 @@ static nrf_radio_signal_callback_return_param_t m_rsc_return_no_action = {
         .params.request = {NULL}
         };
 
-/**< This will be used at the end of each timeslot to end timeslot. */
+/**< This will be used at the end of each timeslot to end timeslot.
 static nrf_radio_signal_callback_return_param_t m_rsc_return_end = {
 		NRF_RADIO_SIGNAL_CALLBACK_ACTION_END,
         .params.request = {NULL}
-        };
+        };*/
 
 
 void RADIO_IRQHandler(void) // 收到了sync packet后经过 radio callback，然后来到这里
@@ -154,13 +154,14 @@ static nrf_radio_signal_callback_return_param_t * radio_callback (uint8_t signal
 
     case NRF_RADIO_CALLBACK_SIGNAL_TYPE_START:
         // TIMER0 is pre-configured for 1Mhz. which means 1us increace one.
+    	NRF_LOG_INFO("TYPE_START\r\n");
         NRF_TIMER0->TASKS_STOP          = 1;
         NRF_TIMER0->TASKS_CLEAR         = 1;
         NRF_TIMER0->MODE                = (TIMER_MODE_MODE_Timer << TIMER_MODE_MODE_Pos);
         NRF_TIMER0->EVENTS_COMPARE[0]   = 0;													// You still need to enable compare interrupt
         NRF_TIMER0->EVENTS_COMPARE[1]   = 0;  													// what dose "=0" mean?
-        NRF_TIMER0->CC[0]               = (TS_LEN_US - TS_SAFETY_MARGIN_US);					// capture/compare 0 是 timeslot lenght - safety margin
-        NRF_TIMER0->CC[1]               = (TS_LEN_US - TS_EXTEND_MARGIN_US);					// timeslot tutorial 里也有这一句
+        NRF_TIMER0->CC[0]               = (TS_LEN_US - TS_SAFETY_MARGIN_US);
+        NRF_TIMER0->CC[1]               = (TS_LEN_US - TS_EXTEND_MARGIN_US);
         NRF_TIMER0->BITMODE             = (TIMER_BITMODE_BITMODE_24Bit << TIMER_BITMODE_BITMODE_Pos);//把 timer0 设置为 24bit，TIMER0 is pre-configured for 1Mhz
         NRF_TIMER0->TASKS_START         = 1;														   // start timer0
 
@@ -186,12 +187,17 @@ static nrf_radio_signal_callback_return_param_t * radio_callback (uint8_t signal
     case NRF_RADIO_CALLBACK_SIGNAL_TYPE_TIMER0:
 
     	if(I_WANNA_STOP){
-    		return (nrf_radio_signal_callback_return_param_t*) &m_rsc_return_end;
+    		timeslot_end_handler();
+    		NVIC_DisableIRQ(TIMER0_IRQn);
+    		NRF_RADIO->POWER                = (RADIO_POWER_POWER_Disabled << RADIO_POWER_POWER_Pos);
+    		NVIC_DisableIRQ(RADIO_IRQn);
+    		NVIC_DisableIRQ(ts_params.egu_irq_type);
+    		//return (nrf_radio_signal_callback_return_param_t*) &m_rsc_return_end;
     	}else{
 			// for both RX and TX mode
 			if (NRF_TIMER0->EVENTS_COMPARE[0] && (NRF_TIMER0->INTENSET & (TIMER_INTENSET_COMPARE0_Enabled << TIMER_INTENCLR_COMPARE0_Pos)))
 			{
-				NRF_TIMER0->TASKS_STOP  = 1;
+				NRF_TIMER0->TASKS_STOP  = 1; // stop timer0
 				NRF_TIMER0->EVENTS_COMPARE[0] = 0;	// 这是说停止timer0后在清零compare？
 				(void)NRF_TIMER0->EVENTS_COMPARE[0];
 
@@ -216,7 +222,7 @@ static nrf_radio_signal_callback_return_param_t * radio_callback (uint8_t signal
 				NRF_TIMER0->EVENTS_COMPARE[1] = 0;
 				(void)NRF_TIMER0->EVENTS_COMPARE[1];
 
-				// This is the "try to extend timeslot" timeout
+				// This is the "try to extend timeslot" timeout		RX模式下就是需要一只处于扫描状态，时刻准备着接受packet
 				if (m_total_timeslot_length < (128000000UL - 5000UL - TX_LEN_EXTENSION_US) && !m_send_sync_pkt)	// 5000UL 是什么？
 				{
 					// Request timeslot extension if total length does not exceed 128 seconds
@@ -240,6 +246,7 @@ static nrf_radio_signal_callback_return_param_t * radio_callback (uint8_t signal
     
     case NRF_RADIO_CALLBACK_SIGNAL_TYPE_EXTEND_FAILED:
         // Don't do anything. Our timer will expire before timeslot ends
+    	NRF_LOG_INFO("extend failed\r\n");
         return (nrf_radio_signal_callback_return_param_t*) &m_rsc_return_no_action;
     
     case NRF_RADIO_CALLBACK_SIGNAL_TYPE_EXTEND_SUCCEEDED:
@@ -658,22 +665,6 @@ uint32_t ts_enable(void) // 这个function返回error_code，所以类型是uint
 
 
 
-// 设置并开启 timer2 这个就是被同步的timer
-	NRF_TIMER2->TASKS_STOP  = 1;
-	NRF_TIMER2->TASKS_CLEAR = 1;
-	NRF_TIMER2->PRESCALER   = 8; // 原值为：SYNC_TIMER_PRESCALER
-	NRF_TIMER2->BITMODE     = TIMER_BITMODE_BITMODE_16Bit << TIMER_BITMODE_BITMODE_Pos;		//16 bit timer
-	NRF_TIMER2->CC[0]       = TIMER_MAX_VAL;
-	NRF_TIMER2->CC[3]       = TIMER_MAX_VAL; // Only used for debugging purposes such as pin toggling
-	NRF_TIMER2->SHORTS      = TIMER_SHORTS_COMPARE0_CLEAR_Msk | TIMER_SHORTS_COMPARE3_CLEAR_Msk;
-	NRF_TIMER2->TASKS_START = 1;
-
-	NRF_TIMER2->EVENTS_COMPARE[3] = 0; // 自己加的 我也不知道这到底是干什么的
-
-	NRF_LOG_INFO("timer2 started\r\n");
-
-
-
 // timeslot related
     if (m_timeslot_session_open) { return NRF_ERROR_INVALID_STATE; } // 这地方是true还是false ? 我觉得是 false
 
@@ -696,13 +687,19 @@ uint32_t ts_enable(void) // 这个function返回error_code，所以类型是uint
      * will be called at ARM interrupt priority level 0. This implies that none of the sd_* API calls can be used from p_radio_signal_callback().
      */
     err_code = sd_radio_session_open(radio_callback); //Opens a session for radio timeslot requests
+    if (err_code != NRF_SUCCESS) { return err_code; }
 NRF_LOG_INFO("error code = %d\r\n", err_code);
-    if (err_code != NRF_SUCCESS) { return err_code; }
-
     // request the first timeslot (which must be of type earliest possible)
-    err_code = sd_radio_request(&m_timeslot_req_earliest); // Requests a radio timeslot // 我觉得这就是开始timeslot，这句话完了之后radio callback里的第一个case就会被call
-
-    if (err_code != NRF_SUCCESS) { return err_code; }
+    err_code = sd_radio_request(&m_timeslot_req_earliest); // Requests a radio timeslot
+    /*
+     * Successful requests will result in nrf_radio_signal_callback_t(@ref NRF_RADIO_CALLBACK_SIGNAL_TYPE_START).
+     * Unsuccessful requests will result in a @ref NRF_EVT_RADIO_BLOCKED event, see @ref NRF_SOC_EVTS.
+     */
+	if (err_code != NRF_SUCCESS)
+	{
+		(void)sd_radio_session_close();
+		return err_code;
+	}
 
     m_timeslot_session_open    	= true;
     
@@ -714,7 +711,7 @@ NRF_LOG_INFO("error code = %d\r\n", err_code);
     
 
     NRF_LOG_INFO("Started listening for beacons.\r\n");
-    NRF_LOG_INFO("Call 'ts_tx_start' to start sending sync beacons\r\n");
+    //NRF_LOG_INFO("Call 'ts_tx_start' to start sending sync beacons\r\n");
 
     return NRF_SUCCESS;
 }

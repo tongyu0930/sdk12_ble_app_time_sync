@@ -56,7 +56,7 @@ static ble_gap_adv_params_t m_adv_params;   /**< Parameters to be passed to the 
 
 static bool                             m_advertising_running       = false;
 static bool 							m_send_sync_pkt 			= false;  // time_sync.c 里也有这个变量，是不是不是一回事？
-static bool 							ts_is_enabled 				= true;
+static bool 							ts_is_enabled 				= false;
 
 APP_TIMER_DEF(m_sync_count_timer_id);
 
@@ -295,7 +295,7 @@ void GPIOTE_IRQHandler(void)
             APP_ERROR_CHECK(err_code);
             NRF_GPIO->OUTSET = BSP_LED_1_MASK; // if ts_tx_stop, LED2 will be off
 
-            NRF_LOG_INFO("Stopping sync beacon transmission!\r\n");
+            NRF_LOG_INFO("Stop TX!\r\n");
         }
         else
         {
@@ -305,7 +305,7 @@ void GPIOTE_IRQHandler(void)
             APP_ERROR_CHECK(err_code);
             NRF_GPIO->OUTCLR = BSP_LED_1_MASK; // if ts_tx_start, LED2 will be off
 
-            NRF_LOG_INFO("Starting sync beacon transmission!\r\n");
+            NRF_LOG_INFO("Start TX!\r\n");
         }
     }
 
@@ -330,29 +330,39 @@ void GPIOTE_IRQHandler(void)
 
     }
 
-    if (NRF_GPIOTE->EVENTS_IN[3] != 0)		// for test
+    if (NRF_GPIOTE->EVENTS_IN[3] != 0)		// for test, disable ts
     {
     	nrf_delay_us(2000);
 
         NRF_GPIOTE->EVENTS_IN[3] = 0;
 
-        if(!ts_is_enabled)
+        if(ts_is_enabled)
         {
-            err_code = ts_enable();
-            APP_ERROR_CHECK(err_code);
+			err_code = ts_disable();
+			APP_ERROR_CHECK(err_code);
 
-            NRF_LOG_INFO("ts enabled\r\n");
+			NRF_LOG_INFO("ts disabled\r\n");
 
-            ts_is_enabled = true;
-        }else{
-            	err_code = ts_disable();
-            	APP_ERROR_CHECK(err_code);
-
-                NRF_LOG_INFO("ts disabled\r\n");
-
-                ts_is_enabled = false;
-         	 }
+			ts_is_enabled = false;
+         }
     }
+
+    if (NRF_GPIOTE->EVENTS_IN[4] != 0)		// for test, enable ts
+        {
+        	nrf_delay_us(2000);
+
+            NRF_GPIOTE->EVENTS_IN[4] = 0;
+
+            if(!ts_is_enabled)
+            {
+				err_code = ts_enable();
+				APP_ERROR_CHECK(err_code);
+
+				NRF_LOG_INFO("ts disabled\r\n");
+
+				ts_is_enabled = true;
+             }
+        }
 }
 
 
@@ -394,7 +404,7 @@ static void gpio_configure(void)
 							(GPIOTE_CONFIG_POLARITY_HiToLo << GPIOTE_CONFIG_POLARITY_Pos) |
 							(BUTTON_2                      << GPIOTE_CONFIG_PSEL_Pos);
 
-	// 自己加的，button3未利用
+	// 自己加的
 	NRF_GPIOTE->CONFIG[3] = (GPIOTE_CONFIG_MODE_Event      << GPIOTE_CONFIG_MODE_Pos)     |
 							(GPIOTE_CONFIG_OUTINIT_Low     << GPIOTE_CONFIG_OUTINIT_Pos)  |
 							(GPIOTE_CONFIG_POLARITY_HiToLo << GPIOTE_CONFIG_POLARITY_Pos) |
@@ -423,7 +433,7 @@ int main(void)
     err_code = NRF_LOG_INIT(NULL);
     APP_ERROR_CHECK(err_code);
 
-    NRF_LOG_INFO("System Started!!!!!!.\r\n");
+    NRF_LOG_INFO("############# System Started ###############\r\n");
 
     APP_TIMER_INIT(APP_TIMER_PRESCALER, APP_TIMER_OP_QUEUE_SIZE, false); //(0,4,false)
     /*
@@ -450,9 +460,23 @@ int main(void)
 
     gpio_configure(); // 注意gpio和timesync是相对独立的，同步时钟本质上不需要gpio
 
+// 设置并开启 timer2 这个就是被同步的timer
+	NRF_TIMER2->TASKS_STOP  = 1;
+	NRF_TIMER2->TASKS_CLEAR = 1;
+	NRF_TIMER2->PRESCALER   = 8; // 原值为：SYNC_TIMER_PRESCALER // frequency = 16000000/(2^8) = 62500 hz
+	NRF_TIMER2->BITMODE     = TIMER_BITMODE_BITMODE_16Bit << TIMER_BITMODE_BITMODE_Pos;		//16 bit timer
+	NRF_TIMER2->CC[0]       = (0xFFFF);
+	NRF_TIMER2->CC[3]       = (0x7FFF); // Only used for debugging purposes such as pin toggling
+	NRF_TIMER2->SHORTS      = TIMER_SHORTS_COMPARE0_CLEAR_Msk | TIMER_SHORTS_COMPARE3_CLEAR_Msk; // 让event_compare register达到cc的值就清零
+	NRF_TIMER2->TASKS_START = 1;
 
-    err_code = ts_enable();
-    APP_ERROR_CHECK(err_code);
+	NRF_TIMER2->EVENTS_COMPARE[3] = 0; // 自己加的 event_compare register 的初始值
+
+	NRF_LOG_INFO("timer2 started\r\n");
+
+
+    //err_code = ts_enable();
+    //APP_ERROR_CHECK(err_code);
 
 
     // Enter main loop.
